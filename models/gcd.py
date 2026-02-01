@@ -102,11 +102,53 @@ def is_mysql_available() -> bool:
     return MYSQL_AVAILABLE
 
 
+def _get_saved_credentials() -> Optional[Dict[str, Any]]:
+    """Get GCD credentials saved via the UI."""
+    try:
+        from database import get_provider_credentials
+        return get_provider_credentials('gcd')
+    except Exception:
+        return None
+
+
+def get_connection_params() -> Optional[Dict[str, Any]]:
+    """
+    Get GCD MySQL connection parameters.
+    Checks saved credentials first, then falls back to environment variables.
+
+    Returns:
+        Dict with host, port, database, username, password or None if not configured
+    """
+    # First try saved credentials from UI
+    saved_creds = _get_saved_credentials()
+    if saved_creds and saved_creds.get('host'):
+        return {
+            'host': saved_creds.get('host'),
+            'port': int(saved_creds.get('port', 3306)),
+            'database': saved_creds.get('database'),
+            'username': saved_creds.get('username'),
+            'password': saved_creds.get('password', '')
+        }
+
+    # Fall back to environment variables
+    gcd_host = os.environ.get('GCD_MYSQL_HOST')
+    if gcd_host:
+        return {
+            'host': gcd_host,
+            'port': int(os.environ.get('GCD_MYSQL_PORT', 3306)),
+            'database': os.environ.get('GCD_MYSQL_DATABASE'),
+            'username': os.environ.get('GCD_MYSQL_USER'),
+            'password': os.environ.get('GCD_MYSQL_PASSWORD', '')
+        }
+
+    return None
+
+
 def check_mysql_status() -> Dict[str, Any]:
     """Check if GCD MySQL database is configured."""
     try:
-        gcd_host = os.environ.get('GCD_MYSQL_HOST')
-        gcd_available = bool(gcd_host and gcd_host.strip())
+        params = get_connection_params()
+        gcd_available = params is not None and bool(params.get('host'))
 
         return {
             "gcd_mysql_available": gcd_available,
@@ -123,6 +165,7 @@ def check_mysql_status() -> Dict[str, Any]:
 def get_connection():
     """
     Create and return a MySQL connection to the GCD database.
+    Uses saved credentials from UI first, falls back to environment variables.
 
     Returns:
         MySQL connection object or None if connection fails
@@ -132,22 +175,21 @@ def get_connection():
         return None
 
     try:
-        gcd_host = os.environ.get('GCD_MYSQL_HOST')
-        gcd_port = int(os.environ.get('GCD_MYSQL_PORT', 3306))
-        gcd_database = os.environ.get('GCD_MYSQL_DATABASE')
-        gcd_user = os.environ.get('GCD_MYSQL_USER')
-        gcd_password = os.environ.get('GCD_MYSQL_PASSWORD')
+        params = get_connection_params()
+        if not params:
+            app_logger.error("GCD MySQL not configured (no saved credentials or environment variables)")
+            return None
 
-        if not all([gcd_host, gcd_database, gcd_user]):
-            app_logger.error("GCD MySQL environment variables not fully configured")
+        if not all([params.get('host'), params.get('database'), params.get('username')]):
+            app_logger.error("GCD MySQL configuration incomplete (missing host, database, or username)")
             return None
 
         conn = mysql.connector.connect(
-            host=gcd_host,
-            port=gcd_port,
-            database=gcd_database,
-            user=gcd_user,
-            password=gcd_password,
+            host=params['host'],
+            port=params['port'],
+            database=params['database'],
+            user=params['username'],
+            password=params['password'],
             charset='utf8mb4',
             collation='utf8mb4_unicode_ci'
         )

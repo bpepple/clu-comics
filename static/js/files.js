@@ -39,14 +39,20 @@ let filterHistory = { source: {}, destination: {} };
 let sourceScrollHistory = {};  // { path: scrollTop }
 let destinationScrollHistory = {};
 
-// Global variable to track GCD MySQL availability
+// Global variable to track GCD MySQL availability (legacy - kept for backwards compatibility)
 let gcdMysqlAvailable = false;
 
-// Global variable to track ComicVine API availability
+// Global variable to track ComicVine API availability (legacy - kept for backwards compatibility)
 let comicVineAvailable = false;
 
-// Global variable to track Metron API availability
+// Global variable to track Metron API availability (legacy - kept for backwards compatibility)
 let metronAvailable = false;
+
+// Library-specific provider tracking (new provider architecture)
+let sourceLibraryId = null;
+let destLibraryId = null;
+let sourceLibraryProviders = [];
+let destLibraryProviders = [];
 
 // Global variable to store current folder path for XML update
 let updateXmlCurrentPath = '';
@@ -78,25 +84,92 @@ function loadCbzPage(pageNum) {
   const encodedPath = encodeFilePathForReader(cbzViewerPath);
   const imageUrl = `/api/read/${encodedPath}/page/${pageNum}`;
 
-  container.innerHTML = '<div class="spinner-border text-primary" role="status"></div>';
+  // Only show spinner if container is empty (first load)
+  const existingImg = container.querySelector('img');
+  if (!existingImg) {
+    container.innerHTML = `
+      <div class="cbz-preview-wrapper">
+        <div class="cbz-spinner text-center py-4">
+          <div class="spinner-border text-primary" role="status"></div>
+        </div>
+        <div class="cbz-image-container" style="display: none;"></div>
+        <div class="cbz-image-info text-center mt-2 small text-muted"></div>
+      </div>`;
+  }
+
+  const spinnerEl = container.querySelector('.cbz-spinner');
+  const imageContainer = container.querySelector('.cbz-image-container');
+  const imageInfo = container.querySelector('.cbz-image-info');
+
+  // Show spinner only on first load
+  if (spinnerEl && !existingImg) {
+    spinnerEl.style.display = 'block';
+  }
 
   const img = new Image();
   img.src = imageUrl;
   img.className = 'img-fluid';
   img.style.maxHeight = '400px';
+  img.style.opacity = '0';
+  img.style.transition = 'opacity 0.2s ease-in';
   img.decoding = 'async';
 
   img.onload = () => {
-    container.innerHTML = '';
-    container.appendChild(img);
+    // Hide spinner
+    if (spinnerEl) spinnerEl.style.display = 'none';
+
+    // Show image container and fade in new image
+    if (imageContainer) {
+      imageContainer.style.display = 'block';
+      imageContainer.innerHTML = '';
+      imageContainer.appendChild(img);
+      // Trigger reflow then fade in
+      img.offsetHeight;
+      img.style.opacity = '1';
+    }
+
+    // Update page info
     cbzViewerCurrentPage = pageNum;
-    document.getElementById('cbzCurrentPage').textContent = pageNum + 1;
     updateCbzPageButtons();
+
+    // Fetch and display image info
+    if (imageInfo) {
+      fetchCbzPageInfo(pageNum, img.naturalWidth, img.naturalHeight, imageInfo);
+    }
   };
 
   img.onerror = () => {
-    container.innerHTML = '<div class="text-danger">Failed to load page</div>';
+    if (spinnerEl) spinnerEl.style.display = 'none';
+    if (imageContainer) {
+      imageContainer.style.display = 'block';
+      imageContainer.innerHTML = '<div class="text-danger">Failed to load page</div>';
+    }
+    if (imageInfo) imageInfo.innerHTML = '';
   };
+}
+
+function fetchCbzPageInfo(pageNum, width, height, infoElement) {
+  // Get page info from API
+  const encodedPath = encodeFilePathForReader(cbzViewerPath);
+  fetch(`/api/read/${encodedPath}/page/${pageNum}/info`)
+    .then(res => res.json())
+    .then(data => {
+      if (data.success) {
+        const fileName = data.file_name || `Page ${pageNum + 1}`;
+        const fileSize = data.file_size ? formatSize(data.file_size) : '';
+        const dimensions = `${width} × ${height}`;
+        infoElement.innerHTML = `
+          <div><strong>${fileName}</strong></div>
+          <div>${dimensions}${fileSize ? ' • ' + fileSize : ''}</div>`;
+      } else {
+        // Fallback to just dimensions
+        infoElement.innerHTML = `<div>${width} × ${height}</div>`;
+      }
+    })
+    .catch(() => {
+      // Fallback to just dimensions
+      infoElement.innerHTML = `<div>${width} × ${height}</div>`;
+    });
 }
 
 function preloadCbzPages(currentPage) {
@@ -154,10 +227,8 @@ function initCbzPageViewer(filePath) {
       cbzViewerPreloadedPages.clear();
 
       const pageNav = document.getElementById('cbzPageNav');
-      const totalPages = document.getElementById('cbzTotalPages');
 
-      if (cbzViewerPageCount > 1 && pageNav && totalPages) {
-        totalPages.textContent = cbzViewerPageCount;
+      if (cbzViewerPageCount > 1 && pageNav) {
         pageNav.style.display = 'flex';
         loadCbzPage(0);
         preloadCbzPages(0);
@@ -227,6 +298,171 @@ function checkMetronAvailability() {
       console.warn('Error checking Metron availability:', error);
       metronAvailable = false;
     });
+}
+
+// ==========================================
+// Library Provider Functions (New Provider Architecture)
+// ==========================================
+
+// Fetch providers configured for a specific library
+async function fetchLibraryProviders(libraryId) {
+  if (!libraryId) return [];
+  try {
+    const response = await fetch(`/api/libraries/${libraryId}/providers`);
+    const data = await response.json();
+    if (data.success && data.providers) {
+      // Filter to enabled providers, sorted by priority
+      const providers = data.providers
+        .filter(p => p.enabled)
+        .sort((a, b) => a.priority - b.priority);
+      console.log(`Loaded ${providers.length} providers for library ${libraryId}:`, providers.map(p => p.provider_type));
+      return providers;
+    }
+  } catch (e) {
+    console.error('Failed to fetch library providers:', e);
+  }
+  return [];
+}
+
+// Get providers for a specific panel
+function getProvidersForPanel(panel) {
+  return panel === 'source' ? sourceLibraryProviders : destLibraryProviders;
+}
+
+// Get library ID for a specific panel
+function getLibraryIdForPanel(panel) {
+  return panel === 'source' ? sourceLibraryId : destLibraryId;
+}
+
+// Check if a specific provider is available for the panel
+function hasProvider(panel, providerType) {
+  const providers = getProvidersForPanel(panel);
+  return providers.some(p => p.provider_type === providerType);
+}
+
+// Cascade metadata search through providers in priority order
+async function cascadeMetadataSearch(filePath, fileName, providers) {
+  if (!providers || providers.length === 0) {
+    showToast('No Providers', 'No metadata providers configured for this library', 'warning');
+    return;
+  }
+
+  const providerNames = providers.map(p => p.provider_type).join(', ');
+  showToast('Searching Metadata', `Trying providers: ${providerNames}`, 'info');
+
+  for (const provider of providers) {
+    try {
+      console.log(`Trying provider: ${provider.provider_type}`);
+      const result = await searchProviderMetadata(filePath, fileName, provider.provider_type);
+      if (result && result.success) {
+        showToast('Metadata Found', `Found via ${provider.provider_type}`, 'success');
+        return result;
+      }
+      console.log(`Provider ${provider.provider_type} returned no results, trying next...`);
+    } catch (e) {
+      console.log(`Provider ${provider.provider_type} failed: ${e.message}, trying next...`);
+    }
+  }
+
+  showToast('No Metadata', 'No metadata found from any provider', 'warning');
+  return null;
+}
+
+// Route to appropriate search function based on provider type
+async function searchProviderMetadata(filePath, fileName, providerType) {
+  switch (providerType) {
+    case 'gcd':
+      return await searchGCDMetadataAsync(filePath, fileName);
+    case 'comicvine':
+      return await searchComicVineMetadataAsync(filePath, fileName);
+    case 'metron':
+      return await searchMetronMetadataAsync(filePath, fileName);
+    case 'anilist':
+      return await searchAniListMetadataAsync(filePath, fileName);
+    case 'bedetheque':
+      return await searchBedethequeMetadataAsync(filePath, fileName);
+    case 'mangadex':
+      return await searchMangaDexMetadataAsync(filePath, fileName);
+    default:
+      console.warn(`Unknown provider type: ${providerType}`);
+      return { success: false, error: `Unknown provider: ${providerType}` };
+  }
+}
+
+// Async wrapper for GCD metadata search
+async function searchGCDMetadataAsync(filePath, fileName) {
+  return new Promise((resolve) => {
+    // Use the existing searchGCDMetadata function but wrap it for async cascade
+    const originalFn = window.searchGCDMetadata;
+    if (typeof originalFn === 'function') {
+      // Call the existing function - it handles its own UI
+      originalFn(filePath, fileName);
+      // For now, assume success if function exists (actual result is handled by existing UI)
+      resolve({ success: true, provider: 'gcd' });
+    } else {
+      resolve({ success: false, error: 'GCD search not available' });
+    }
+  });
+}
+
+// Async wrapper for ComicVine metadata search
+async function searchComicVineMetadataAsync(filePath, fileName) {
+  return new Promise((resolve) => {
+    const originalFn = window.searchComicVineMetadata;
+    if (typeof originalFn === 'function') {
+      originalFn(filePath, fileName);
+      resolve({ success: true, provider: 'comicvine' });
+    } else {
+      resolve({ success: false, error: 'ComicVine search not available' });
+    }
+  });
+}
+
+// Async wrapper for Metron metadata search
+async function searchMetronMetadataAsync(filePath, fileName) {
+  return new Promise((resolve) => {
+    const originalFn = window.searchMetronMetadata;
+    if (typeof originalFn === 'function') {
+      originalFn(filePath, fileName);
+      resolve({ success: true, provider: 'metron' });
+    } else {
+      resolve({ success: false, error: 'Metron search not available' });
+    }
+  });
+}
+
+// Async wrapper for AniList metadata search (placeholder - needs implementation)
+async function searchAniListMetadataAsync(filePath, fileName) {
+  // TODO: Implement AniList metadata search
+  console.log('AniList search not yet implemented');
+  return { success: false, error: 'AniList search not yet implemented' };
+}
+
+// Async wrapper for Bedetheque metadata search (placeholder - needs implementation)
+async function searchBedethequeMetadataAsync(filePath, fileName) {
+  // TODO: Implement Bedetheque metadata search
+  console.log('Bedetheque search not yet implemented');
+  return { success: false, error: 'Bedetheque search not yet implemented' };
+}
+
+// Async wrapper for MangaDex metadata search (placeholder - needs implementation)
+async function searchMangaDexMetadataAsync(filePath, fileName) {
+  // TODO: Implement MangaDex metadata search
+  console.log('MangaDex search not yet implemented');
+  return { success: false, error: 'MangaDex search not yet implemented' };
+}
+
+// Cascade metadata fetch for all files in a directory
+async function fetchAllMetadataCascade(directoryPath, directoryName, providers, libraryId) {
+  if (!providers || providers.length === 0) {
+    showToast('No Providers', 'No metadata providers configured for this library', 'warning');
+    return;
+  }
+
+  // Pass library ID to fetchAllMetadata so API uses library-specific providers
+  if (typeof fetchAllMetadata === 'function') {
+    fetchAllMetadata(directoryPath, directoryName, libraryId);
+  }
 }
 
 // Helper function to create drop target item
@@ -480,38 +716,55 @@ function createListItem(itemName, fullPath, type, panel, isDraggable) {
     iconContainer.appendChild(infoBtn);
     console.log('Info button added');
 
-    // Add GCD search button for metadata retrieval (only if GCD is available)
-    if (gcdMysqlAvailable) {
+    // Get providers configured for this library
+    const providers = getProvidersForPanel(panel);
+    const hasGCD = providers.some(p => p.provider_type === 'gcd');
+    const hasAnyProvider = providers.length > 0;
+
+    // Add cloud-download button for cascade metadata search (if any providers configured)
+    if (hasAnyProvider) {
+      const metadataBtn = document.createElement("button");
+      metadataBtn.className = "btn btn-sm btn-outline-success";
+      metadataBtn.innerHTML = '<i class="bi bi-cloud-download"></i>';
+      metadataBtn.title = "Fetch Metadata (cascade through providers)";
+      metadataBtn.setAttribute("type", "button");
+      metadataBtn.onclick = function (e) {
+        e.stopPropagation();
+        cascadeMetadataSearch(fullPath, fileData.name, providers);
+      };
+      iconContainer.appendChild(metadataBtn);
+      console.log('Metadata cascade button added');
+    }
+
+    // Add GCD-specific button (database-down icon) if GCD is available
+    if (hasGCD) {
       const gcdBtn = document.createElement("button");
-      gcdBtn.className = "btn btn-sm btn-outline-success";
-      gcdBtn.innerHTML = '<i class="bi bi-cloud-download"></i>';
-      gcdBtn.title = "Search GCD for Metadata";
+      gcdBtn.className = "btn btn-sm btn-outline-info";
+      gcdBtn.innerHTML = '<i class="bi bi-database-down"></i>';
+      gcdBtn.title = "Search GCD Database Only";
       gcdBtn.setAttribute("type", "button");
       gcdBtn.onclick = function (e) {
         e.stopPropagation();
         searchGCDMetadata(fullPath, fileData.name);
       };
       iconContainer.appendChild(gcdBtn);
-      console.log('GCD button added');
-    } else {
-      console.log('GCD button skipped - GCD MySQL not available');
+      console.log('GCD-specific button added');
     }
 
-    // Add ComicVine search button (only if ComicVine API key is configured)
-    if (comicVineAvailable) {
-      const cvBtn = document.createElement("button");
-      cvBtn.className = "btn btn-sm btn-outline-success";
-      cvBtn.innerHTML = '<i class="bi bi-book"></i>';
-      cvBtn.title = "Search ComicVine for Metadata";
-      cvBtn.setAttribute("type", "button");
-      cvBtn.onclick = function (e) {
-        e.stopPropagation();
-        searchComicVineMetadata(fullPath, fileData.name);
-      };
-      iconContainer.appendChild(cvBtn);
-      console.log('ComicVine button added');
-    } else {
-      console.log('ComicVine button skipped - API key not configured');
+    // Fallback: if no providers but legacy availability flags are set, show legacy buttons
+    if (!hasAnyProvider && (gcdMysqlAvailable || comicVineAvailable)) {
+      if (gcdMysqlAvailable) {
+        const gcdBtn = document.createElement("button");
+        gcdBtn.className = "btn btn-sm btn-outline-success";
+        gcdBtn.innerHTML = '<i class="bi bi-cloud-download"></i>';
+        gcdBtn.title = "Search GCD for Metadata (legacy)";
+        gcdBtn.setAttribute("type", "button");
+        gcdBtn.onclick = function (e) {
+          e.stopPropagation();
+          searchGCDMetadata(fullPath, fileData.name);
+        };
+        iconContainer.appendChild(gcdBtn);
+      }
     }
   }
 
@@ -570,12 +823,46 @@ function createListItem(itemName, fullPath, type, panel, isDraggable) {
     infoWrapper.appendChild(sizeDisplay);
     iconContainer.appendChild(infoWrapper);
 
-    // Add metadata fetch button for directories (but not for Parent directory, and only if any metadata source is available)
-    if (fileData.name !== "Parent" && (gcdMysqlAvailable || comicVineAvailable || metronAvailable)) {
+    // Get providers configured for this library
+    const providers = getProvidersForPanel(panel);
+    const hasGCD = providers.some(p => p.provider_type === 'gcd');
+    const hasAnyProvider = providers.length > 0;
+
+    // Add cloud-download button for directory cascade metadata fetch
+    if (fileData.name !== "Parent" && hasAnyProvider) {
       const metadataBtn = document.createElement("button");
       metadataBtn.className = "btn btn-sm btn-outline-success";
       metadataBtn.innerHTML = '<i class="bi bi-cloud-download"></i>';
       metadataBtn.title = "Fetch Metadata for All Comics in Directory";
+      metadataBtn.setAttribute("type", "button");
+      metadataBtn.onclick = function (e) {
+        e.stopPropagation();
+        const libraryId = getLibraryIdForPanel(panel);
+        fetchAllMetadataCascade(fullPath, fileData.name, providers, libraryId);
+      };
+      iconContainer.appendChild(metadataBtn);
+    }
+
+    // Add GCD-specific button for directory (database-down icon)
+    if (fileData.name !== "Parent" && hasGCD) {
+      const gcdBtn = document.createElement("button");
+      gcdBtn.className = "btn btn-sm btn-outline-info";
+      gcdBtn.innerHTML = '<i class="bi bi-database-down"></i>';
+      gcdBtn.title = "Fetch GCD Metadata for All Comics";
+      gcdBtn.setAttribute("type", "button");
+      gcdBtn.onclick = function (e) {
+        e.stopPropagation();
+        searchGCDMetadataForDirectory(fullPath, fileData.name);
+      };
+      iconContainer.appendChild(gcdBtn);
+    }
+
+    // Fallback: if no providers but legacy availability flags are set, show legacy button
+    if (fileData.name !== "Parent" && !hasAnyProvider && (gcdMysqlAvailable || comicVineAvailable || metronAvailable)) {
+      const metadataBtn = document.createElement("button");
+      metadataBtn.className = "btn btn-sm btn-outline-success";
+      metadataBtn.innerHTML = '<i class="bi bi-cloud-download"></i>';
+      metadataBtn.title = "Fetch Metadata for All Comics (legacy)";
       metadataBtn.setAttribute("type", "button");
       metadataBtn.onclick = function (e) {
         e.stopPropagation();
@@ -1583,12 +1870,31 @@ function loadRecentFiles(panel) {
           };
           iconContainer.appendChild(infoBtn);
 
-          // Add GCD search button (if available)
-          if (typeof gcdMysqlAvailable !== 'undefined' && gcdMysqlAvailable) {
+          // Use source panel's providers for recent files (or fall back to legacy)
+          const providers = sourceLibraryProviders || [];
+          const hasGCD = providers.some(p => p.provider_type === 'gcd');
+          const hasAnyProvider = providers.length > 0;
+
+          // Add cascade metadata button (if providers configured)
+          if (hasAnyProvider) {
+            const metadataBtn = document.createElement('button');
+            metadataBtn.className = 'btn btn-sm btn-outline-success';
+            metadataBtn.innerHTML = '<i class="bi bi-cloud-download"></i>';
+            metadataBtn.title = 'Fetch Metadata (cascade through providers)';
+            metadataBtn.setAttribute('type', 'button');
+            metadataBtn.onclick = function (e) {
+              e.stopPropagation();
+              cascadeMetadataSearch(file.file_path, file.file_name, providers);
+            };
+            iconContainer.appendChild(metadataBtn);
+          }
+
+          // Add GCD-specific button (if GCD is available)
+          if (hasGCD) {
             const gcdBtn = document.createElement('button');
-            gcdBtn.className = 'btn btn-sm btn-outline-success';
-            gcdBtn.innerHTML = '<i class="bi bi-cloud-download"></i>';
-            gcdBtn.title = 'Search GCD for Metadata';
+            gcdBtn.className = 'btn btn-sm btn-outline-info';
+            gcdBtn.innerHTML = '<i class="bi bi-database-down"></i>';
+            gcdBtn.title = 'Search GCD Database Only';
             gcdBtn.setAttribute('type', 'button');
             gcdBtn.onclick = function (e) {
               e.stopPropagation();
@@ -1597,18 +1903,20 @@ function loadRecentFiles(panel) {
             iconContainer.appendChild(gcdBtn);
           }
 
-          // Add ComicVine search button (if available)
-          if (typeof comicVineAvailable !== 'undefined' && comicVineAvailable) {
-            const cvBtn = document.createElement('button');
-            cvBtn.className = 'btn btn-sm btn-outline-success';
-            cvBtn.innerHTML = '<i class="bi bi-book"></i>';
-            cvBtn.title = 'Search ComicVine for Metadata';
-            cvBtn.setAttribute('type', 'button');
-            cvBtn.onclick = function (e) {
-              e.stopPropagation();
-              searchComicVineMetadata(file.file_path, file.file_name);
-            };
-            iconContainer.appendChild(cvBtn);
+          // Fallback to legacy buttons if no providers configured
+          if (!hasAnyProvider) {
+            if (typeof gcdMysqlAvailable !== 'undefined' && gcdMysqlAvailable) {
+              const gcdBtn = document.createElement('button');
+              gcdBtn.className = 'btn btn-sm btn-outline-success';
+              gcdBtn.innerHTML = '<i class="bi bi-cloud-download"></i>';
+              gcdBtn.title = 'Search GCD for Metadata (legacy)';
+              gcdBtn.setAttribute('type', 'button');
+              gcdBtn.onclick = function (e) {
+                e.stopPropagation();
+                searchGCDMetadata(file.file_path, file.file_name);
+              };
+              iconContainer.appendChild(gcdBtn);
+            }
           }
 
           // Add edit filename button
@@ -2881,10 +3189,6 @@ function showCBZInfo(filePath, fileName, directoryPath, fileList) {
                       <i class="bi bi-chevron-right"></i>
                     </button>
                   </div>
-                  <!-- Page Counter -->
-                  <div class="cbz-page-counter">
-                    <span id="cbzCurrentPage">1</span> / <span id="cbzTotalPages">1</span>
-                  </div>
                 </div>
               </div>
             </div>
@@ -2927,17 +3231,57 @@ function showCBZInfo(filePath, fileName, directoryPath, fileList) {
         clearBtn.addEventListener('click', showClearComicInfoConfirmation);
       }
 
-      // Load preview
+      // Load preview with smooth fade-in
       fetch(`/cbz-preview?path=${encodeURIComponent(filePath)}&size=large`)
         .then(res => res.json())
         .then(previewData => {
           const previewContainer = document.getElementById('cbzPreviewContainer');
           if (previewData.success) {
+            // Create wrapper structure for smooth transitions
             previewContainer.innerHTML = `
-                  <img src="${previewData.preview}" class="img-fluid" style="max-width: 100%; max-height: 400px;" alt="CBZ Preview">
-                  <p class="small text-muted mt-2">${previewData.file_name}</p>
-                  <small class="text-muted">Images: ${previewData.total_images} | Original: ${previewData.original_size.width}×${previewData.original_size.height} | Display: ${previewData.display_size.width}×${previewData.display_size.height}</small>
-                `;
+              <div class="cbz-preview-wrapper">
+                <div class="cbz-spinner text-center py-2">
+                  <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                </div>
+                <div class="cbz-image-container" style="display: none;"></div>
+                <div class="cbz-image-info text-center mt-2 small text-muted"></div>
+              </div>`;
+
+            const spinnerEl = previewContainer.querySelector('.cbz-spinner');
+            const imageContainer = previewContainer.querySelector('.cbz-image-container');
+            const imageInfo = previewContainer.querySelector('.cbz-image-info');
+
+            // Pre-load image
+            const img = new Image();
+            img.src = previewData.preview;
+            img.className = 'img-fluid';
+            img.style.maxWidth = '100%';
+            img.style.maxHeight = '400px';
+            img.style.opacity = '0';
+            img.style.transition = 'opacity 0.2s ease-in';
+            img.alt = 'CBZ Preview';
+
+            img.onload = () => {
+              // Hide spinner, show image with fade
+              spinnerEl.style.display = 'none';
+              imageContainer.style.display = 'block';
+              imageContainer.appendChild(img);
+              // Trigger reflow then fade in
+              img.offsetHeight;
+              img.style.opacity = '1';
+
+              // Show image info
+              imageInfo.innerHTML = `
+                <div><strong>${previewData.file_name}</strong></div>
+                <div>${previewData.original_size.width} × ${previewData.original_size.height} • ${previewData.total_images} images</div>`;
+            };
+
+            img.onerror = () => {
+              spinnerEl.style.display = 'none';
+              imageContainer.style.display = 'block';
+              imageContainer.innerHTML = '<p class="text-muted">Preview not available</p>';
+            };
+
             // Initialize page viewer for multi-page navigation
             initCbzPageViewer(filePath);
           } else {
@@ -4662,7 +5006,7 @@ function searchGCDMetadataForDirectory(directoryPath, directoryName) {
 }
 
 // Function to fetch metadata for all comics in a directory using multiple sources
-function fetchAllMetadata(directoryPath, directoryName) {
+function fetchAllMetadata(directoryPath, directoryName, libraryId = null) {
   // Show loading toast with progress
   const loadingToast = document.createElement('div');
   loadingToast.className = 'toast show position-fixed';
@@ -4687,10 +5031,14 @@ function fetchAllMetadata(directoryPath, directoryName) {
   const progressFile = loadingToast.querySelector('#batch-progress-file');
 
   // Call batch-metadata endpoint with SSE streaming
+  const requestBody = { directory: directoryPath };
+  if (libraryId) {
+    requestBody.library_id = libraryId;
+  }
   fetch('/api/batch-metadata', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ directory: directoryPath })
+    body: JSON.stringify(requestBody)
   })
     .then(response => {
       // Check if response is SSE stream or JSON
@@ -4704,7 +5052,7 @@ function fetchAllMetadata(directoryPath, directoryName) {
               document.body.removeChild(loadingToast);
             }
             // Show volume selection modal
-            showBatchVolumeSelectionModal(data, directoryPath, directoryName);
+            showBatchVolumeSelectionModal(data, directoryPath, directoryName, libraryId);
             return; // Exit the promise chain
           }
           // Error response
@@ -5967,7 +6315,7 @@ function showComicVineVolumeSelectionModal(data, filePath, fileName) {
 }
 
 // Show volume selection modal for batch metadata (directory processing)
-function showBatchVolumeSelectionModal(data, directoryPath, directoryName) {
+function showBatchVolumeSelectionModal(data, directoryPath, directoryName, libraryId = null) {
   console.log('Showing batch volume selection modal', data);
 
   // Populate parsed info
@@ -6024,7 +6372,7 @@ function showBatchVolumeSelectionModal(data, directoryPath, directoryName) {
       modal.hide();
 
       // Re-call fetchAllMetadata with the selected volume_id
-      fetchAllMetadataWithVolume(directoryPath, directoryName, volume.id);
+      fetchAllMetadataWithVolume(directoryPath, directoryName, volume.id, libraryId);
     });
 
     volumeList.appendChild(volumeItem);
@@ -6036,7 +6384,7 @@ function showBatchVolumeSelectionModal(data, directoryPath, directoryName) {
 }
 
 // Fetch metadata with a pre-selected volume ID
-function fetchAllMetadataWithVolume(directoryPath, directoryName, volumeId) {
+function fetchAllMetadataWithVolume(directoryPath, directoryName, volumeId, libraryId = null) {
   // Show loading toast
   const loadingToast = document.createElement('div');
   loadingToast.className = 'toast show position-fixed';
@@ -6061,10 +6409,14 @@ function fetchAllMetadataWithVolume(directoryPath, directoryName, volumeId) {
   const progressFile = loadingToast.querySelector('#batch-progress-file-v');
 
   // Call batch-metadata with volume_id
+  const requestBody = { directory: directoryPath, volume_id: volumeId };
+  if (libraryId) {
+    requestBody.library_id = libraryId;
+  }
   fetch('/api/batch-metadata', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ directory: directoryPath, volume_id: volumeId })
+    body: JSON.stringify(requestBody)
   })
     .then(response => {
       const contentType = response.headers.get('content-type');

@@ -231,25 +231,55 @@
         cursor: not-allowed;
     }
 
-    .cbz-page-counter {
-        position: absolute;
-        bottom: 10px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.7);
-        color: white;
-        padding: 0.25rem 0.75rem;
-        border-radius: 1rem;
-        font-size: 0.875rem;
-    }
-
     #cbzPageViewer {
         min-height: 200px;
     }
 
     #cbzPreviewContainer {
         display: flex;
+        flex-direction: column;
         align-items: center;
         justify-content: center;
         min-height: 200px;
+    }
+
+    /* Smooth image loading transitions */
+    #cbzPreviewContainer .cbz-image-wrapper {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+
+    #cbzPreviewContainer img {
+        transition: opacity 0.2s ease-in;
+        max-width: 100%;
+        height: auto;
+    }
+
+    /* Image info display */
+    .cbz-image-info {
+        margin-top: 0.75rem;
+        padding: 0.5rem 1rem;
+        background-color: rgba(0, 0, 0, 0.05);
+        border-radius: 0.375rem;
+        font-size: 0.8rem;
+        color: #6c757d;
+        text-align: center;
+    }
+
+    .cbz-image-info .info-item {
+        display: inline-block;
+        margin: 0 0.5rem;
+    }
+
+    .cbz-image-info .info-item:not(:last-child)::after {
+        content: "•";
+        margin-left: 1rem;
+        color: #adb5bd;
+    }
+
+    .cbz-image-info .info-label {
+        font-weight: 500;
+        color: #495057;
     }

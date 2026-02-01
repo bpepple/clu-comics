@@ -4,6 +4,7 @@ import re
 import hashlib
 import zipfile
 from datetime import datetime
+from typing import Optional
 from config import config
 from app_logging import app_logger
 
@@ -549,6 +550,50 @@ def init_db():
         ''')
         c.execute('CREATE INDEX IF NOT EXISTS idx_libraries_path ON libraries(path)')
         c.execute('CREATE INDEX IF NOT EXISTS idx_libraries_enabled ON libraries(enabled)')
+
+        # Create provider_credentials table (encrypted API credentials)
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS provider_credentials (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider_type TEXT NOT NULL UNIQUE,
+                credentials_encrypted BLOB NOT NULL,
+                credentials_nonce BLOB NOT NULL,
+                is_valid INTEGER DEFAULT 0,
+                last_tested TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # Create library_providers table (provider configuration per library)
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS library_providers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                library_id INTEGER NOT NULL,
+                provider_type TEXT NOT NULL,
+                priority INTEGER NOT NULL DEFAULT 0,
+                enabled INTEGER DEFAULT 1,
+                FOREIGN KEY (library_id) REFERENCES libraries(id) ON DELETE CASCADE,
+                UNIQUE(library_id, provider_type)
+            )
+        ''')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_library_providers_library ON library_providers(library_id)')
+
+        # Create provider_cache table (unified cache for all providers)
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS provider_cache (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider_type TEXT NOT NULL,
+                cache_type TEXT NOT NULL,
+                provider_id TEXT NOT NULL,
+                data TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP,
+                UNIQUE(provider_type, cache_type, provider_id)
+            )
+        ''')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_provider_cache_lookup ON provider_cache(provider_type, cache_type, provider_id)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_provider_cache_expires ON provider_cache(expires_at)')
 
         # Migration: Auto-create default library if table is empty and /data exists
         c.execute('SELECT COUNT(*) FROM libraries')
@@ -5643,3 +5688,329 @@ def bulk_set_manual_status(series_id, issue_numbers, status, notes=None):
     finally:
         if conn:
             conn.close()
+
+
+# =============================================================================
+# Provider Credential Functions
+# =============================================================================
+
+def save_provider_credentials(provider_type: str, credentials: dict) -> bool:
+    """
+    Save encrypted provider credentials to the database.
+
+    Args:
+        provider_type: Provider identifier (e.g., 'metron', 'comicvine')
+        credentials: Dictionary of credential data
+
+    Returns:
+        True if saved successfully, False otherwise
+    """
+    try:
+        from models.providers.crypto import encrypt_credentials, is_crypto_available
+
+        if not is_crypto_available():
+            app_logger.error("Cannot save credentials: cryptography library not available")
+            return False
+
+        ciphertext, nonce = encrypt_credentials(credentials)
+        conn = get_db_connection()
+        conn.execute('''
+            INSERT INTO provider_credentials (provider_type, credentials_encrypted, credentials_nonce, updated_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(provider_type) DO UPDATE SET
+                credentials_encrypted = excluded.credentials_encrypted,
+                credentials_nonce = excluded.credentials_nonce,
+                updated_at = CURRENT_TIMESTAMP
+        ''', (provider_type, ciphertext, nonce))
+        conn.commit()
+        conn.close()
+        app_logger.info(f"Saved credentials for provider: {provider_type}")
+        return True
+    except Exception as e:
+        app_logger.error(f"Failed to save provider credentials for {provider_type}: {e}")
+        return False
+
+
+def get_provider_credentials(provider_type: str) -> Optional[dict]:
+    """
+    Get decrypted provider credentials from the database.
+
+    Args:
+        provider_type: Provider identifier (e.g., 'metron', 'comicvine')
+
+    Returns:
+        Decrypted credentials dictionary, or None if not found
+    """
+    try:
+        from models.providers.crypto import decrypt_credentials, is_crypto_available
+
+        if not is_crypto_available():
+            app_logger.error("Cannot get credentials: cryptography library not available")
+            return None
+
+        conn = get_db_connection()
+        row = conn.execute('''
+            SELECT credentials_encrypted, credentials_nonce
+            FROM provider_credentials WHERE provider_type = ?
+        ''', (provider_type,)).fetchone()
+        conn.close()
+
+        if not row:
+            return None
+
+        return decrypt_credentials(row['credentials_encrypted'], row['credentials_nonce'])
+    except Exception as e:
+        app_logger.error(f"Failed to get provider credentials for {provider_type}: {e}")
+        return None
+
+
+def get_provider_credentials_masked(provider_type: str) -> Optional[dict]:
+    """
+    Get masked provider credentials (safe for frontend display).
+
+    Args:
+        provider_type: Provider identifier
+
+    Returns:
+        Dictionary with masked credential values
+    """
+    try:
+        from models.providers.crypto import mask_credentials_dict
+
+        creds = get_provider_credentials(provider_type)
+        if not creds:
+            return None
+        return mask_credentials_dict(creds)
+    except Exception as e:
+        app_logger.error(f"Failed to get masked credentials for {provider_type}: {e}")
+        return None
+
+
+def get_all_provider_credentials_status() -> list:
+    """
+    Get status of all configured providers (without decrypting credentials).
+
+    Returns:
+        List of dicts with provider_type, is_valid, last_tested
+    """
+    try:
+        conn = get_db_connection()
+        rows = conn.execute('''
+            SELECT provider_type, is_valid, last_tested, updated_at
+            FROM provider_credentials
+            ORDER BY provider_type
+        ''').fetchall()
+        conn.close()
+
+        return [dict(row) for row in rows]
+    except Exception as e:
+        app_logger.error(f"Failed to get provider credentials status: {e}")
+        return []
+
+
+def update_provider_validity(provider_type: str, is_valid: bool) -> bool:
+    """
+    Update provider connection test result.
+
+    Args:
+        provider_type: Provider identifier
+        is_valid: Whether the last connection test was successful
+
+    Returns:
+        True if updated successfully
+    """
+    try:
+        conn = get_db_connection()
+        conn.execute('''
+            UPDATE provider_credentials
+            SET is_valid = ?, last_tested = CURRENT_TIMESTAMP
+            WHERE provider_type = ?
+        ''', (1 if is_valid else 0, provider_type))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        app_logger.error(f"Failed to update provider validity for {provider_type}: {e}")
+        return False
+
+
+def delete_provider_credentials(provider_type: str) -> bool:
+    """
+    Delete provider credentials from the database.
+
+    Args:
+        provider_type: Provider identifier
+
+    Returns:
+        True if deleted successfully
+    """
+    try:
+        conn = get_db_connection()
+        conn.execute('DELETE FROM provider_credentials WHERE provider_type = ?', (provider_type,))
+        conn.commit()
+        conn.close()
+        app_logger.info(f"Deleted credentials for provider: {provider_type}")
+        return True
+    except Exception as e:
+        app_logger.error(f"Failed to delete provider credentials for {provider_type}: {e}")
+        return False
+
+
+def register_provider_configured(provider_type: str, is_valid: bool = True) -> bool:
+    """
+    Register a provider as configured (for providers that don't require auth).
+
+    Creates a record in provider_credentials with empty placeholder credentials,
+    marking the provider as available for use.
+
+    Args:
+        provider_type: Provider identifier (e.g., 'anilist', 'bedetheque')
+        is_valid: Whether the provider is valid/working
+
+    Returns:
+        True if registered successfully, False otherwise
+    """
+    try:
+        from models.providers.crypto import encrypt_credentials, is_crypto_available
+
+        if not is_crypto_available():
+            app_logger.error("Cannot register provider: cryptography library not available")
+            return False
+
+        # Encrypt empty credentials as placeholder
+        ciphertext, nonce = encrypt_credentials({"_configured": True})
+
+        conn = get_db_connection()
+        conn.execute('''
+            INSERT INTO provider_credentials (provider_type, credentials_encrypted, credentials_nonce, is_valid, last_tested, updated_at)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT(provider_type) DO UPDATE SET
+                is_valid = excluded.is_valid,
+                last_tested = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+        ''', (provider_type, ciphertext, nonce, 1 if is_valid else 0))
+        conn.commit()
+        conn.close()
+        app_logger.info(f"Registered provider as configured: {provider_type}")
+        return True
+    except Exception as e:
+        app_logger.error(f"Failed to register provider {provider_type}: {e}")
+        return False
+
+
+# =============================================================================
+# Library Provider Configuration Functions
+# =============================================================================
+
+def get_library_providers(library_id: int) -> list:
+    """
+    Get enabled providers for a library, ordered by priority.
+
+    Args:
+        library_id: Library ID
+
+    Returns:
+        List of provider configurations
+    """
+    try:
+        conn = get_db_connection()
+        rows = conn.execute('''
+            SELECT provider_type, priority, enabled
+            FROM library_providers
+            WHERE library_id = ?
+            ORDER BY priority ASC
+        ''', (library_id,)).fetchall()
+        conn.close()
+
+        return [dict(row) for row in rows]
+    except Exception as e:
+        app_logger.error(f"Failed to get library providers for library {library_id}: {e}")
+        return []
+
+
+def set_library_providers(library_id: int, providers: list) -> bool:
+    """
+    Set the provider configuration for a library.
+
+    Args:
+        library_id: Library ID
+        providers: List of dicts with provider_type, priority, enabled
+
+    Returns:
+        True if saved successfully
+    """
+    try:
+        conn = get_db_connection()
+
+        # Clear existing providers for this library
+        conn.execute('DELETE FROM library_providers WHERE library_id = ?', (library_id,))
+
+        # Insert new providers
+        for p in providers:
+            conn.execute('''
+                INSERT INTO library_providers (library_id, provider_type, priority, enabled)
+                VALUES (?, ?, ?, ?)
+            ''', (library_id, p['provider_type'], p.get('priority', 0), p.get('enabled', 1)))
+
+        conn.commit()
+        conn.close()
+        app_logger.info(f"Set {len(providers)} providers for library {library_id}")
+        return True
+    except Exception as e:
+        app_logger.error(f"Failed to set library providers for library {library_id}: {e}")
+        return False
+
+
+def add_library_provider(library_id: int, provider_type: str, priority: int = 0, enabled: bool = True) -> bool:
+    """
+    Add a provider to a library.
+
+    Args:
+        library_id: Library ID
+        provider_type: Provider identifier
+        priority: Priority order (lower = higher priority)
+        enabled: Whether the provider is enabled
+
+    Returns:
+        True if added successfully
+    """
+    try:
+        conn = get_db_connection()
+        conn.execute('''
+            INSERT INTO library_providers (library_id, provider_type, priority, enabled)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(library_id, provider_type) DO UPDATE SET
+                priority = excluded.priority,
+                enabled = excluded.enabled
+        ''', (library_id, provider_type, priority, 1 if enabled else 0))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        app_logger.error(f"Failed to add provider {provider_type} to library {library_id}: {e}")
+        return False
+
+
+def remove_library_provider(library_id: int, provider_type: str) -> bool:
+    """
+    Remove a provider from a library.
+
+    Args:
+        library_id: Library ID
+        provider_type: Provider identifier
+
+    Returns:
+        True if removed successfully
+    """
+    try:
+        conn = get_db_connection()
+        conn.execute('''
+            DELETE FROM library_providers
+            WHERE library_id = ? AND provider_type = ?
+        ''', (library_id, provider_type))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        app_logger.error(f"Failed to remove provider {provider_type} from library {library_id}: {e}")
+        return False

@@ -857,9 +857,9 @@ async function loadLibraryDropdowns() {
             document.getElementById('sourceLibraryName').textContent = defaultLib.name;
             document.getElementById('destLibraryName').textContent = defaultLib.name;
 
-            // Load default library in source panel on page load
-            loadDirectories(defaultLib.path, 'source');
-            loadDirectories(defaultLib.path, 'destination');
+            // Load default library in source panel on page load (with library ID for provider loading)
+            await selectLibrary(defaultLib.path, 'source', defaultLib.name, defaultLib.id);
+            await selectLibrary(defaultLib.path, 'destination', defaultLib.name, defaultLib.id);
         }
     } catch (e) {
         console.error('Error loading library dropdowns:', e);
@@ -883,17 +883,30 @@ function populateLibraryMenu(menuId, panel, libraries) {
         a.textContent = lib.name;
         a.onclick = function(e) {
             e.preventDefault();
-            selectLibrary(lib.path, panel, lib.name);
+            selectLibrary(lib.path, panel, lib.name, lib.id);
         };
         li.appendChild(a);
         menu.appendChild(li);
     });
 }
 
-function selectLibrary(path, panel, name) {
+async function selectLibrary(path, panel, name, libraryId) {
     // Update dropdown button text
     const nameSpan = document.getElementById(panel === 'source' ? 'sourceLibraryName' : 'destLibraryName');
     if (nameSpan) nameSpan.textContent = name;
+
+    // Fetch and store providers for this library
+    if (libraryId) {
+        const providers = await fetchLibraryProviders(libraryId);
+        if (panel === 'source') {
+            sourceLibraryId = libraryId;
+            sourceLibraryProviders = providers;
+        } else {
+            destLibraryId = libraryId;
+            destLibraryProviders = providers;
+        }
+        console.log(`Library ${name} (${panel}): ${providers.length} providers loaded`);
+    }
 
     // Load the library root directory
     loadDirectories(path, panel);

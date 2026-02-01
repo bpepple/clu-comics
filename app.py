@@ -7001,6 +7001,70 @@ def read_comic_page(comic_path, page_num):
             archive.close()
         return send_file('static/images/error.svg', mimetype='image/svg+xml')
 
+
+@app.route('/api/read/<path:comic_path>/page/<int:page_num>/info')
+def read_comic_page_info(comic_path, page_num):
+    """Get information about a specific page in a comic file."""
+
+    # Add leading slash if missing (for absolute paths on Unix systems)
+    if not comic_path.startswith('/'):
+        comic_path = '/' + comic_path
+
+    if not os.path.exists(comic_path):
+        return jsonify({"success": False, "error": "File not found"}), 404
+
+    try:
+        ext = os.path.splitext(comic_path)[1].lower()
+        archive = None
+
+        if ext in ['.cbz', '.zip']:
+            archive = zipfile.ZipFile(comic_path, 'r')
+        elif ext == '.cbr':
+            archive = rarfile.RarFile(comic_path, 'r')
+        else:
+            return jsonify({"success": False, "error": "Unsupported format"}), 400
+
+        # Get list of image files
+        image_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp')
+        image_files = []
+        for filename in archive.namelist():
+            if filename.lower().endswith(image_extensions):
+                if not filename.startswith('__MACOSX') and not os.path.basename(filename).startswith('.'):
+                    image_files.append(filename)
+
+        # Sort naturally
+        def natural_sort_key(s):
+            return [int(text) if text.isdigit() else text.lower() for text in re.split('([0-9]+)', s)]
+        image_files.sort(key=natural_sort_key)
+
+        if page_num < 0 or page_num >= len(image_files):
+            archive.close()
+            return jsonify({"success": False, "error": "Invalid page number"}), 400
+
+        target_file = image_files[page_num]
+
+        # Get file info from archive
+        info = archive.getinfo(target_file)
+        file_size = info.file_size if hasattr(info, 'file_size') else info.compress_size
+        file_name = os.path.basename(target_file)
+
+        archive.close()
+
+        return jsonify({
+            "success": True,
+            "page_num": page_num,
+            "file_name": file_name,
+            "file_size": file_size,
+            "archive_path": target_file
+        })
+
+    except Exception as e:
+        app_logger.error(f"Error getting page info for {comic_path} page {page_num}: {e}")
+        if archive:
+            archive.close()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/read/<path:comic_path>/info')
 def read_comic_info(comic_path):
     """Get information about a comic file (page count, etc.)."""
@@ -8046,6 +8110,260 @@ def save_cvinfo():
         return jsonify({"error": str(e)}), 500
 
 
+#####################################
+#       Provider Management API      #
+#####################################
+
+@app.route('/api/providers', methods=['GET'])
+def list_providers():
+    """List all available metadata providers with their configuration."""
+    try:
+        from models.providers import get_available_providers
+        from database import get_all_provider_credentials_status, get_provider_credentials_masked
+
+        providers = get_available_providers()
+        credentials_status = {s['provider_type']: s for s in get_all_provider_credentials_status()}
+
+        # Enrich providers with credential status and masked credentials
+        for p in providers:
+            status = credentials_status.get(p['type'], {})
+            p['has_credentials'] = p['type'] in credentials_status
+            p['is_valid'] = status.get('is_valid', 0) == 1
+            p['last_tested'] = status.get('last_tested')
+            # Include masked credentials if available
+            if p['has_credentials']:
+                p['credentials_masked'] = get_provider_credentials_masked(p['type'])
+            else:
+                p['credentials_masked'] = None
+
+        return jsonify({"success": True, "providers": providers})
+    except Exception as e:
+        app_logger.error(f"Error listing providers: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/providers/<provider_type>/credentials', methods=['GET'])
+def get_provider_creds(provider_type):
+    """Get masked credentials for a provider (safe for display)."""
+    try:
+        from database import get_provider_credentials_masked
+
+        masked = get_provider_credentials_masked(provider_type)
+        if not masked:
+            return jsonify({"success": True, "has_credentials": False, "credentials": {}})
+
+        return jsonify({
+            "success": True,
+            "has_credentials": True,
+            "credentials": masked
+        })
+    except Exception as e:
+        app_logger.error(f"Error getting provider credentials: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/providers/<provider_type>/credentials', methods=['POST'])
+def save_provider_creds(provider_type):
+    """Save credentials for a provider."""
+    try:
+        from database import save_provider_credentials
+        from models.providers import ProviderType
+
+        # Validate provider type
+        try:
+            ProviderType(provider_type)
+        except ValueError:
+            return jsonify({"error": f"Unknown provider type: {provider_type}"}), 400
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No credentials provided"}), 400
+
+        # Save credentials
+        success = save_provider_credentials(provider_type, data)
+        if success:
+            return jsonify({"success": True, "message": f"Credentials saved for {provider_type}"})
+        else:
+            return jsonify({"error": "Failed to save credentials"}), 500
+    except Exception as e:
+        app_logger.error(f"Error saving provider credentials: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/providers/<provider_type>/credentials', methods=['DELETE'])
+def delete_provider_creds(provider_type):
+    """Delete credentials for a provider."""
+    try:
+        from database import delete_provider_credentials
+
+        success = delete_provider_credentials(provider_type)
+        if success:
+            return jsonify({"success": True, "message": f"Credentials deleted for {provider_type}"})
+        else:
+            return jsonify({"error": "Failed to delete credentials"}), 500
+    except Exception as e:
+        app_logger.error(f"Error deleting provider credentials: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/providers/<provider_type>/test', methods=['POST'])
+def test_provider_connection(provider_type):
+    """Test connection to a provider using saved credentials."""
+    try:
+        from database import get_provider_credentials, update_provider_validity, register_provider_configured
+        from models.providers import get_provider_by_name, get_provider_class, ProviderCredentials
+
+        # Validate provider type
+        from models.providers import ProviderType
+        try:
+            ptype = ProviderType(provider_type)
+        except ValueError:
+            return jsonify({"error": f"Unknown provider type: {provider_type}"}), 400
+
+        # Check if provider requires authentication
+        provider_class = get_provider_class(ptype)
+        requires_auth = provider_class.requires_auth if provider_class else True
+
+        # Get saved credentials
+        creds_dict = get_provider_credentials(provider_type)
+        if not creds_dict and requires_auth:
+            return jsonify({"success": False, "error": "No credentials configured"}), 400
+
+        # Create provider instance with credentials (or None for public APIs)
+        credentials = ProviderCredentials.from_dict(creds_dict) if creds_dict else None
+        provider = get_provider_by_name(provider_type, credentials)
+
+        # Test connection
+        is_valid = provider.test_connection()
+
+        # Update validity in database
+        # For auth-free providers, register them as configured when test succeeds
+        if not requires_auth:
+            register_provider_configured(provider_type, is_valid)
+        else:
+            update_provider_validity(provider_type, is_valid)
+
+        if is_valid:
+            return jsonify({"success": True, "valid": True, "message": f"Connection to {provider_type} successful"})
+        else:
+            return jsonify({"success": True, "valid": False, "error": f"Connection to {provider_type} failed"})
+    except Exception as e:
+        app_logger.error(f"Error testing provider connection: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/libraries/<int:library_id>/providers', methods=['GET'])
+def get_library_provider_config(library_id):
+    """Get provider configuration for a library."""
+    try:
+        from database import get_library_providers, get_library_by_id
+
+        # Verify library exists
+        library = get_library_by_id(library_id)
+        if not library:
+            return jsonify({"error": "Library not found"}), 404
+
+        providers = get_library_providers(library_id)
+
+        return jsonify({
+            "success": True,
+            "library_id": library_id,
+            "library_name": library.get('name'),
+            "providers": providers
+        })
+    except Exception as e:
+        app_logger.error(f"Error getting library providers: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/libraries/<int:library_id>/providers', methods=['PUT'])
+def set_library_provider_config(library_id):
+    """Set provider configuration for a library."""
+    try:
+        from database import set_library_providers, get_library_by_id
+
+        # Verify library exists
+        library = get_library_by_id(library_id)
+        if not library:
+            return jsonify({"error": "Library not found"}), 404
+
+        data = request.get_json()
+        if not data or 'providers' not in data:
+            return jsonify({"error": "Missing providers list"}), 400
+
+        providers = data['providers']
+
+        # Validate provider types
+        from models.providers import ProviderType
+        for p in providers:
+            try:
+                ProviderType(p.get('provider_type', ''))
+            except ValueError:
+                return jsonify({"error": f"Unknown provider type: {p.get('provider_type')}"}), 400
+
+        success = set_library_providers(library_id, providers)
+        if success:
+            return jsonify({"success": True, "message": f"Provider configuration saved for library {library_id}"})
+        else:
+            return jsonify({"error": "Failed to save provider configuration"}), 500
+    except Exception as e:
+        app_logger.error(f"Error setting library providers: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/libraries/<int:library_id>/providers/<provider_type>', methods=['POST'])
+def add_library_provider(library_id, provider_type):
+    """Add a provider to a library."""
+    try:
+        from database import add_library_provider as db_add_library_provider, get_library_by_id
+
+        # Verify library exists
+        library = get_library_by_id(library_id)
+        if not library:
+            return jsonify({"error": "Library not found"}), 404
+
+        # Validate provider type
+        from models.providers import ProviderType
+        try:
+            ProviderType(provider_type)
+        except ValueError:
+            return jsonify({"error": f"Unknown provider type: {provider_type}"}), 400
+
+        data = request.get_json() or {}
+        priority = data.get('priority', 0)
+        enabled = data.get('enabled', True)
+
+        success = db_add_library_provider(library_id, provider_type, priority, enabled)
+        if success:
+            return jsonify({"success": True, "message": f"Added {provider_type} to library {library_id}"})
+        else:
+            return jsonify({"error": "Failed to add provider to library"}), 500
+    except Exception as e:
+        app_logger.error(f"Error adding library provider: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/libraries/<int:library_id>/providers/<provider_type>', methods=['DELETE'])
+def remove_library_provider(library_id, provider_type):
+    """Remove a provider from a library."""
+    try:
+        from database import remove_library_provider as db_remove_library_provider, get_library_by_id
+
+        # Verify library exists
+        library = get_library_by_id(library_id)
+        if not library:
+            return jsonify({"error": "Library not found"}), 404
+
+        success = db_remove_library_provider(library_id, provider_type)
+        if success:
+            return jsonify({"success": True, "message": f"Removed {provider_type} from library {library_id}"})
+        else:
+            return jsonify({"error": "Failed to remove provider from library"}), 500
+    except Exception as e:
+        app_logger.error(f"Error removing library provider: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/batch-metadata', methods=['POST'])
 def batch_metadata():
     """
@@ -8063,9 +8381,12 @@ def batch_metadata():
     from comicinfo import read_comicinfo_from_zip
 
     try:
+        from database import get_library_providers
+
         data = request.get_json()
         directory = data.get('directory')
         selected_volume_id = data.get('volume_id')  # Optional: pre-selected ComicVine volume ID
+        library_id = data.get('library_id')  # Optional: library ID for provider lookup
 
         if not directory:
             return jsonify({"error": "Missing directory parameter"}), 400
@@ -8079,16 +8400,34 @@ def batch_metadata():
         if not os.path.exists(directory) or not os.path.isdir(directory):
             return jsonify({"error": "Directory not found"}), 404
 
-        # Get API credentials
+        # Always load API credentials (needed for provider initialization)
         comicvine_api_key = app.config.get('COMICVINE_API_KEY', '')
         metron_username = app.config.get('METRON_USERNAME', '')
         metron_password = app.config.get('METRON_PASSWORD', '')
 
-        comicvine_available = bool(comicvine_api_key and comicvine_api_key.strip())
-        metron_available = bool(metron_password and metron_password.strip())
-        gcd_available = gcd.is_mysql_available() and gcd.check_mysql_status().get('gcd_mysql_available', False)
+        # Determine provider availability
+        # If library_id is provided, use library-specific providers
+        # Otherwise fall back to global configuration
+        if library_id:
+            library_providers = get_library_providers(library_id)
+            enabled_providers = [p['provider_type'] for p in library_providers if p.get('enabled', True)]
+            comicvine_available = 'comicvine' in enabled_providers
+            metron_available = 'metron' in enabled_providers
+            gcd_available = 'gcd' in enabled_providers
+            anilist_available = 'anilist' in enabled_providers
+            bedetheque_available = 'bedetheque' in enabled_providers
+            mangadex_available = 'mangadex' in enabled_providers
+            app_logger.info(f"Library {library_id} providers: {enabled_providers}")
+        else:
+            # Fallback to global API credential availability checks
+            comicvine_available = bool(comicvine_api_key and comicvine_api_key.strip())
+            metron_available = bool(metron_password and metron_password.strip())
+            gcd_available = gcd.is_mysql_available() and gcd.check_mysql_status().get('gcd_mysql_available', False)
+            anilist_available = False
+            bedetheque_available = False
+            mangadex_available = False
 
-        app_logger.info(f"Batch metadata: CV={comicvine_available}, Metron={metron_available}, GCD={gcd_available}")
+        app_logger.info(f"Batch metadata: CV={comicvine_available}, Metron={metron_available}, GCD={gcd_available}, AniList={anilist_available}, MangaDex={mangadex_available}")
 
         # Initialize Metron API early (needed for cvinfo creation)
         metron_api = None
@@ -8318,15 +8657,26 @@ def batch_metadata():
                         result['details'].append({'file': filename, 'status': 'skipped', 'reason': 'CBR format'})
                         continue
 
-                    # Extract issue number from filename
+                    # Extract issue/volume number from filename
                     issue_number = comicvine.extract_issue_number(filename)
-                    if not issue_number:
+
+                    # For manga, also try to extract volume number (v01, v02, etc.)
+                    volume_number = None
+                    volume_match = re.search(r'\bv(\d+)', filename, re.IGNORECASE)
+                    if volume_match:
+                        volume_number = volume_match.group(1).lstrip('0') or '1'
+
+                    # Use volume number for manga providers (AniList, MangaDex), issue number for comics
+                    if (anilist_available or mangadex_available) and volume_number:
+                        issue_number = volume_number
+                        app_logger.info(f"Using volume number {volume_number} for manga: {filename}")
+                    elif not issue_number:
                         app_logger.warning(f"Could not extract issue number from {filename}")
                         result['errors'] += 1
                         result['details'].append({'file': filename, 'status': 'error', 'reason': 'no issue number'})
                         continue
 
-                    app_logger.info(f"Processing {filename} (issue #{issue_number})")
+                    app_logger.info(f"Processing {filename} (issue/vol #{issue_number})")
 
                     # Try sources based on volume year
                     metadata = None
@@ -8387,10 +8737,75 @@ def batch_metadata():
                             app_logger.warning(f"Metron lookup failed for {filename}: {e}")
                         return False
 
-                    # Always use Metron-first order: Metron -> ComicVine -> GCD
-                    if not try_metron():
-                        if not try_comicvine():
-                            try_gcd()
+                    # Helper function for AniList lookup (manga)
+                    def try_anilist():
+                        nonlocal metadata, source
+                        if not anilist_available:
+                            return False
+                        try:
+                            from models.providers.anilist_provider import AniListProvider
+                            anilist = AniListProvider()
+
+                            # Get series name from directory
+                            series_name = os.path.basename(directory)
+                            series_name = re.sub(r'\s*\(\d{4}\).*$', '', series_name)
+                            series_name = re.sub(r'\s*v\d+.*$', '', series_name)
+
+                            # Search for the manga
+                            results = anilist.search_series(series_name, gcd_year)
+                            if results:
+                                series = results[0]  # Take first/best match
+                                metadata = anilist.get_issue_metadata(series.id, issue_number)
+                                if metadata:
+                                    source = 'AniList'
+                                    app_logger.info(f"Found metadata from AniList for {filename}")
+                                    return True
+                        except Exception as e:
+                            app_logger.warning(f"AniList lookup failed for {filename}: {e}")
+                        return False
+
+                    # Helper function for MangaDex lookup (manga)
+                    def try_mangadex():
+                        nonlocal metadata, source
+                        if not mangadex_available:
+                            return False
+                        try:
+                            from models.providers.mangadex_provider import MangaDexProvider
+                            mangadex = MangaDexProvider()
+
+                            # Get series name from directory
+                            series_name = os.path.basename(directory)
+                            series_name = re.sub(r'\s*\(\d{4}\).*$', '', series_name)
+                            series_name = re.sub(r'\s*v\d+.*$', '', series_name)
+
+                            # Search for the manga
+                            results = mangadex.search_series(series_name, gcd_year)
+                            if results:
+                                series = results[0]  # Take first/best match
+                                metadata = mangadex.get_issue_metadata(series.id, issue_number)
+                                if metadata:
+                                    source = 'MangaDex'
+                                    app_logger.info(f"Found metadata from MangaDex for {filename}")
+                                    return True
+                        except Exception as e:
+                            app_logger.warning(f"MangaDex lookup failed for {filename}: {e}")
+                        return False
+
+                    # Use providers in order based on what's available
+                    # For manga (AniList/MangaDex), try those first; otherwise use comic providers
+                    if mangadex_available or anilist_available:
+                        # Manga mode: try MangaDex first, then AniList
+                        if not try_mangadex():
+                            if not try_anilist():
+                                # Fall back to other providers if configured
+                                if not try_metron():
+                                    if not try_comicvine():
+                                        try_gcd()
+                    else:
+                        # Comic mode: Metron -> ComicVine -> GCD
+                        if not try_metron():
+                            if not try_comicvine():
+                                try_gcd()
 
                     if metadata:
                         # Generate and add ComicInfo.xml
@@ -9245,6 +9660,174 @@ def sanitize_config_value(value: str) -> str:
     return sanitized.strip()
 
 
+#####################################
+#    Config API Endpoints (AJAX)    #
+#####################################
+
+@app.route('/api/config/file-processing', methods=['POST'])
+def save_file_processing_config():
+    """Save file processing settings via AJAX."""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No data provided"}), 400
+
+        # Ensure SETTINGS section exists
+        if "SETTINGS" not in config:
+            config["SETTINGS"] = {}
+
+        # Update config values
+        config["SETTINGS"]["WATCH"] = data.get("watch", "/temp")
+        config["SETTINGS"]["TARGET"] = data.get("target", "/processed")
+        config["SETTINGS"]["AUTOCONVERT"] = str(data.get("autoConvert", False))
+        config["SETTINGS"]["READ_SUBDIRECTORIES"] = str(data.get("readSubdirectories", False))
+        config["SETTINGS"]["AUTO_UNPACK"] = str(data.get("autoUnpack", False))
+        config["SETTINGS"]["MOVE_DIRECTORY"] = str(data.get("moveDirectory", False))
+        config["SETTINGS"]["IGNORED_EXTENSIONS"] = data.get("ignored_extensions", "")
+        config["SETTINGS"]["AUTO_CLEANUP_ORPHAN_FILES"] = str(data.get("autoCleanupOrphanFiles", False))
+        config["SETTINGS"]["CLEANUP_INTERVAL_HOURS"] = data.get("cleanupIntervalHours", "24")
+        config["SETTINGS"]["CONVERT_SUBDIRECTORIES"] = str(data.get("convertSubdirectories", False))
+        config["SETTINGS"]["SKIPPED_FILES"] = data.get("skippedFiles", "")
+        config["SETTINGS"]["DELETED_FILES"] = data.get("deletedFiles", "")
+        config["SETTINGS"]["ENABLE_CUSTOM_RENAME"] = str(data.get("enableCustomRename", False))
+        config["SETTINGS"]["CUSTOM_RENAME_PATTERN"] = data.get("customRenamePattern", "")
+
+        write_config()
+        load_flask_config(app)
+        return jsonify({"success": True, "message": "File processing settings saved"})
+    except Exception as e:
+        app_logger.error(f"Error saving file processing config: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/config/download-api', methods=['POST'])
+def save_download_api_config():
+    """Save download and API settings via AJAX."""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No data provided"}), 400
+
+        # Ensure SETTINGS section exists
+        if "SETTINGS" not in config:
+            config["SETTINGS"] = {}
+
+        # Update config values
+        config["SETTINGS"]["HEADERS"] = data.get("customHeaders", "")
+        config["SETTINGS"]["PIXELDRAIN_API_KEY"] = sanitize_config_value(data.get("pixeldrainApiKey", ""))
+        config["SETTINGS"]["COMICVINE_API_KEY"] = sanitize_config_value(data.get("comicvineApiKey", ""))
+        config["SETTINGS"]["GCD_METADATA_LANGUAGES"] = data.get("gcdLanguages", "en")
+        config["SETTINGS"]["METRON_USERNAME"] = sanitize_config_value(data.get("metronUsername", ""))
+        config["SETTINGS"]["METRON_PASSWORD"] = sanitize_config_value(data.get("metronPassword", ""))
+        config["SETTINGS"]["ENABLE_AUTO_RENAME"] = str(data.get("enableAutoRename", False))
+        config["SETTINGS"]["ENABLE_AUTO_MOVE"] = str(data.get("enableAutoMove", False))
+        config["SETTINGS"]["CUSTOM_MOVE_PATTERN"] = data.get("customMovePattern", "{publisher}/{series_name}/v{year}")
+
+        write_config()
+        load_flask_config(app)
+        return jsonify({"success": True, "message": "Download & API settings saved"})
+    except Exception as e:
+        app_logger.error(f"Error saving download/API config: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/config/system-perf', methods=['POST'])
+def save_system_perf_config():
+    """Save system and performance settings via AJAX."""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No data provided"}), 400
+
+        # Ensure SETTINGS section exists
+        if "SETTINGS" not in config:
+            config["SETTINGS"] = {}
+
+        # Update config values
+        config["SETTINGS"]["OPERATION_TIMEOUT"] = data.get("operationTimeout", "3600")
+        config["SETTINGS"]["LARGE_FILE_THRESHOLD"] = data.get("largeFileThreshold", "500")
+        config["SETTINGS"]["TIMEZONE"] = data.get("timezone", "UTC")
+        config["SETTINGS"]["REBUILD_FREQUENCY"] = data.get("rebuildFrequency", "disabled")
+        config["SETTINGS"]["REBUILD_TIME"] = data.get("rebuildTime", "02:00")
+        config["SETTINGS"]["REBUILD_WEEKDAY"] = data.get("rebuildWeekday", "0")
+        config["SETTINGS"]["SYNC_FREQUENCY"] = data.get("syncFrequency", "disabled")
+        config["SETTINGS"]["SYNC_TIME"] = data.get("syncTime", "03:00")
+        config["SETTINGS"]["SYNC_WEEKDAY"] = data.get("syncWeekday", "0")
+        config["SETTINGS"]["GETCOMICS_FREQUENCY"] = data.get("getcomicsFrequency", "disabled")
+        config["SETTINGS"]["GETCOMICS_TIME"] = data.get("getcomicsTime", "04:00")
+        config["SETTINGS"]["GETCOMICS_WEEKDAY"] = data.get("getcomicsWeekday", "0")
+        config["SETTINGS"]["IGNORED_TERMS"] = data.get("ignored_terms", "")
+        config["SETTINGS"]["IGNORED_FILES"] = data.get("ignored_files", "")
+        config["SETTINGS"]["ENABLE_DEBUG_LOGGING"] = str(data.get("enableDebugLogging", False))
+        config["SETTINGS"]["XML_YEAR"] = str(data.get("xmlYear", False))
+        config["SETTINGS"]["XML_MARKDOWN"] = str(data.get("xmlMarkdown", False))
+        config["SETTINGS"]["XML_LIST"] = str(data.get("xmlList", False))
+
+        write_config()
+        load_flask_config(app)
+
+        # Update logger level dynamically
+        import logging
+        if config["SETTINGS"]["ENABLE_DEBUG_LOGGING"] == "True":
+            app_logger.setLevel(logging.DEBUG)
+        else:
+            app_logger.setLevel(logging.INFO)
+
+        return jsonify({"success": True, "message": "System & Performance settings saved"})
+    except Exception as e:
+        app_logger.error(f"Error saving system/perf config: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/config/styling', methods=['POST'])
+def save_styling_config():
+    """Save styling settings via AJAX."""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No data provided"}), 400
+
+        # Ensure SETTINGS section exists
+        if "SETTINGS" not in config:
+            config["SETTINGS"] = {}
+
+        # Update config values
+        config["SETTINGS"]["BOOTSTRAP_THEME"] = data.get("bootstrapTheme", "darkly")
+
+        write_config()
+        load_flask_config(app)
+        return jsonify({"success": True, "message": "Styling settings saved"})
+    except Exception as e:
+        app_logger.error(f"Error saving styling config: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/config/recommendations', methods=['POST'])
+def save_recommendations_config():
+    """Save recommendation settings via AJAX."""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No data provided"}), 400
+
+        # Ensure SETTINGS section exists
+        if "SETTINGS" not in config:
+            config["SETTINGS"] = {}
+
+        # Update config values
+        config["SETTINGS"]["REC_ENABLED"] = str(data.get("recEnabled", False))
+        config["SETTINGS"]["REC_PROVIDER"] = data.get("recProvider", "gemini")
+        config["SETTINGS"]["REC_API_KEY"] = sanitize_config_value(data.get("recApiKey", ""))
+        config["SETTINGS"]["REC_MODEL"] = data.get("recModel", "gemini-2.0-flash")
+
+        write_config()
+        load_flask_config(app)
+        return jsonify({"success": True, "message": "Recommendation settings saved"})
+    except Exception as e:
+        app_logger.error(f"Error saving recommendations config: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route("/config", methods=["GET", "POST"])
 def config_page():
     if request.method == "POST":
@@ -10029,19 +10612,21 @@ def search_gcd_metadata():
         app_logger.debug(f"DEBUG: About to connect to database...")
         # Connect to GCD MySQL database
         try:
-            # Get database connection details from environment variables
-            gcd_host = os.environ.get('GCD_MYSQL_HOST')
-            gcd_port = int(os.environ.get('GCD_MYSQL_PORT'))
-            gcd_database = os.environ.get('GCD_MYSQL_DATABASE')
-            gcd_user = os.environ.get('GCD_MYSQL_USER')
-            gcd_password = os.environ.get('GCD_MYSQL_PASSWORD')
+            # Get database connection details (checks saved credentials first, then env vars)
+            from models.gcd import get_connection_params
+            params = get_connection_params()
+            if not params:
+                return jsonify({
+                    "success": False,
+                    "error": "GCD MySQL not configured. Set credentials in Config or use environment variables."
+                }), 500
 
             connection = mysql.connector.connect(
-                host=gcd_host,
-                port=gcd_port,
-                database=gcd_database,
-                user=gcd_user,
-                password=gcd_password,
+                host=params['host'],
+                port=params['port'],
+                database=params['database'],
+                user=params['username'],
+                password=params['password'],
                 charset='utf8mb4',
                 connection_timeout=30,  # 30 second connection timeout
                 autocommit=True
@@ -10841,13 +11426,47 @@ def add_comicinfo_to_cbz(file_path, comicinfo_xml_bytes):
     try:
         # Step 1: Extract all files to temporary directory
         os.makedirs(temp_extract_dir, exist_ok=True)
+        corrupted_files = []
 
         with zipfile.ZipFile(file_path, 'r') as src:
             for filename in src.namelist():
                 # Skip any existing ComicInfo.xml
                 if os.path.basename(filename).lower() == "comicinfo.xml":
                     continue
-                src.extract(filename, temp_extract_dir)
+                try:
+                    src.extract(filename, temp_extract_dir)
+                except zipfile.BadZipFile as crc_error:
+                    # Handle corrupted files with bad CRC
+                    app_logger.warning(f"Corrupted file in archive (bad CRC): {filename} - attempting raw copy")
+                    corrupted_files.append(filename)
+                    try:
+                        # Try to copy the file data without CRC verification
+                        # Get the ZipInfo object
+                        info = src.getinfo(filename)
+                        # Create the target path
+                        target_path = os.path.join(temp_extract_dir, filename)
+                        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                        # Read raw data (may be corrupted but we'll preserve what we can)
+                        with src.open(filename) as zf:
+                            # Read in chunks to handle large files
+                            with open(target_path, 'wb') as out:
+                                while True:
+                                    try:
+                                        chunk = zf.read(8192)
+                                        if not chunk:
+                                            break
+                                        out.write(chunk)
+                                    except zipfile.BadZipFile:
+                                        # Write what we have and stop
+                                        app_logger.warning(f"Partial extraction for corrupted file: {filename}")
+                                        break
+                    except Exception as copy_error:
+                        app_logger.error(f"Failed to copy corrupted file {filename}: {copy_error}")
+                        # Skip this file entirely
+                        continue
+
+        if corrupted_files:
+            app_logger.warning(f"Archive had {len(corrupted_files)} corrupted file(s), processed with best effort")
 
         # Step 2: Write ComicInfo.xml to temp directory
         comicinfo_path = os.path.join(temp_extract_dir, "ComicInfo.xml")
@@ -10991,18 +11610,21 @@ def search_gcd_metadata_with_selection():
 
         # Connect to GCD MySQL database
         try:
-            gcd_host = os.environ.get('GCD_MYSQL_HOST')
-            gcd_port = int(os.environ.get('GCD_MYSQL_PORT'))
-            gcd_database = os.environ.get('GCD_MYSQL_DATABASE')
-            gcd_user = os.environ.get('GCD_MYSQL_USER')
-            gcd_password = os.environ.get('GCD_MYSQL_PASSWORD')
+            # Get database connection details (checks saved credentials first, then env vars)
+            from models.gcd import get_connection_params
+            params = get_connection_params()
+            if not params:
+                return jsonify({
+                    "success": False,
+                    "error": "GCD MySQL not configured"
+                }), 500
 
             connection = mysql.connector.connect(
-                host=gcd_host,
-                port=gcd_port,
-                database=gcd_database,
-                user=gcd_user,
-                password=gcd_password,
+                host=params['host'],
+                port=params['port'],
+                database=params['database'],
+                user=params['username'],
+                password=params['password'],
                 charset='utf8mb4'
             )
             cursor = connection.cursor(dictionary=True)

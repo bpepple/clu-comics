@@ -23,7 +23,7 @@
 
 <div class="container-lg">
     <h2 class="text-primary-emphasis">App Settings</h2>
-    <form method="POST" class="mt-4">
+    <div class="mt-4">
 
         <!-- Navigation Tabs -->
         <ul class="nav nav-tabs mb-4" id="configTabs" role="tablist">
@@ -40,6 +40,11 @@
                 <button class="nav-link" id="download-api-tab" data-bs-toggle="tab" data-bs-target="#download-api"
                     type="button" role="tab" aria-controls="download-api" aria-selected="false">Download and
                     API</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="metadata-providers-tab" data-bs-toggle="tab" data-bs-target="#metadata-providers"
+                    type="button" role="tab" aria-controls="metadata-providers" aria-selected="false">Metadata
+                    Providers</button>
             </li>
             <li class="nav-item" role="presentation">
                 <button class="nav-link" id="system-perf-tab" data-bs-toggle="tab" data-bs-target="#system-perf"
@@ -324,7 +329,7 @@
 
                 <!-- Save Button for Tab 1 -->
                 <div class="mb-3 text-center">
-                    <button type="submit" class="btn btn-primary">
+                    <button type="button" class="btn btn-primary" onclick="saveFileProcessingSettings()">
                         <i class="bi bi-floppy"></i> Save File Processing Settings
                     </button>
                 </div>
@@ -358,7 +363,7 @@
                             <div class="input-group">
                                 <input type="password" name="pixeldrainApiKey" id="pixeldrainApiKey"
                                     value="{{ pixeldrainApiKey }}" class="form-control password-field"
-                                    placeholder="Enter your PixelDrain API key">
+                                    placeholder="Enter your PixelDrain API key" autocomplete="off">
                                 <button class="btn btn-outline-secondary toggle-password" type="button"
                                     data-target="pixeldrainApiKey">
                                     <i class="bi bi-eye"></i>
@@ -384,7 +389,7 @@
                             <div class="input-group">
                                 <input type="password" name="comicvineApiKey" id="comicvineApiKey"
                                     value="{{ comicvineApiKey }}" class="form-control password-field"
-                                    placeholder="Enter your ComicVine API key">
+                                    placeholder="Enter your ComicVine API key" autocomplete="off">
                                 <button class="btn btn-outline-secondary toggle-password" type="button"
                                     data-target="comicvineApiKey">
                                     <i class="bi bi-eye"></i>
@@ -423,7 +428,7 @@
                             <div class="input-group">
                                 <input type="password" name="metronPassword" id="metronPassword"
                                     value="{{ metronPassword }}" class="form-control password-field"
-                                    placeholder="Enter your Metron password">
+                                    placeholder="Enter your Metron password" autocomplete="current-password">
                                 <button class="btn btn-outline-secondary toggle-password" type="button"
                                     data-target="metronPassword">
                                     <i class="bi bi-eye"></i>
@@ -498,7 +503,7 @@
 
                 <!-- Save Button for Tab 2 -->
                 <div class="mb-3 text-center">
-                    <button type="submit" class="btn btn-primary">
+                    <button type="button" class="btn btn-primary" onclick="saveDownloadApiSettings()">
                         <i class="bi bi-floppy"></i> Save Download & API Settings
                     </button>
                 </div>
@@ -506,7 +511,44 @@
             </div>
 
             <!-- ========================================== -->
-            <!-- TAB 3: System and Performance -->
+            <!-- TAB 3: Metadata Providers -->
+            <!-- ========================================== -->
+            <div class="tab-pane fade" id="metadata-providers" role="tabpanel" aria-labelledby="metadata-providers-tab">
+
+                <!-- Provider Credentials -->
+                <div class="container p-4 border rounded shadow-sm mb-4">
+                    <h4>Provider Credentials</h4>
+                    <p class="text-muted">Configure API credentials for metadata providers. Credentials are stored encrypted.</p>
+
+                    <div id="providersCredentialsList" class="mb-3">
+                        <div class="text-center py-3">
+                            <div class="spinner-border spinner-border-sm" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <span class="ms-2">Loading providers...</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Library Provider Configuration -->
+                <div class="container p-4 border rounded shadow-sm mb-4">
+                    <h4>Library Provider Settings</h4>
+                    <p class="text-muted">Configure which metadata providers to use for each library and their priority order.</p>
+
+                    <div id="libraryProvidersList" class="mb-3">
+                        <div class="text-center py-3">
+                            <div class="spinner-border spinner-border-sm" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <span class="ms-2">Loading library settings...</span>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- ========================================== -->
+            <!-- TAB 4: System and Performance -->
             <!-- ========================================== -->
             <div class="tab-pane fade" id="system-perf" role="tabpanel" aria-labelledby="system-perf-tab">
 
@@ -944,9 +986,9 @@
                     </div>
                 </div>
 
-                <!-- Save Button for Tab 3 -->
+                <!-- Save Button for Tab 4 - System & Performance -->
                 <div class="mb-3 text-center">
-                    <button type="submit" class="btn btn-primary">
+                    <button type="button" class="btn btn-primary" onclick="saveSystemPerfSettings()">
                         <i class="bi bi-floppy"></i> Save System & Performance Settings
                     </button>
                 </div>
@@ -1036,9 +1078,9 @@
                     </div>
                 </div>
 
-                <!-- Save Button for Tab 4 -->
+                <!-- Save Button for Tab 5 - Styling -->
                 <div class="mb-3 text-center">
-                    <button type="submit" class="btn btn-primary">
+                    <button type="button" class="btn btn-primary" onclick="saveStylingSettings()">
                         <i class="bi bi-floppy"></i> Save Styling Settings
                     </button>
                 </div>
@@ -1109,9 +1151,9 @@
                     </div>
                 </div>
 
-                <!-- Save Button for Tab 5 -->
+                <!-- Save Button for Tab 6 - Recommendations -->
                 <div class="mb-3 text-center">
-                    <button type="submit" class="btn btn-primary">
+                    <button type="button" class="btn btn-primary" onclick="saveRecommendationSettings()">
                         <i class="bi bi-floppy"></i> Save Recommendation Settings
                     </button>
                 </div>
@@ -1119,7 +1161,7 @@
             </div>
         </div>
 
-    </form>
+    </div>
 
     <!-- Restart Button -->
     <div class="container p-4 border rounded shadow-sm text-center">
@@ -1188,6 +1230,206 @@
             .then(response => response.json())
             .then(data => showToast(data.message, 'success'))
             .catch(error => console.error('Error:', error));
+    }
+
+    // =========================================
+    // Tab-specific AJAX Save Functions
+    // =========================================
+
+    async function saveFileProcessingSettings() {
+        const btn = event.target.closest('button');
+        const originalHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving...';
+
+        const data = {
+            watch: document.getElementById('watch')?.value || '',
+            target: document.getElementById('target')?.value || '',
+            autoConvert: document.getElementById('autoConvert')?.checked || false,
+            readSubdirectories: document.getElementById('readSubdirectories')?.checked || false,
+            autoUnpack: document.getElementById('autoUnpack')?.checked || false,
+            moveDirectory: document.getElementById('moveDirectory')?.checked || false,
+            ignored_extensions: document.getElementById('ignored_extensions')?.value || '',
+            autoCleanupOrphanFiles: document.getElementById('autoCleanupOrphanFiles')?.checked || false,
+            cleanupIntervalHours: document.getElementById('cleanupIntervalHours')?.value || '24',
+            convertSubdirectories: document.getElementById('convertSubdirectories')?.checked || false,
+            skippedFiles: document.getElementById('skippedFiles')?.value || '',
+            deletedFiles: document.getElementById('deletedFiles')?.value || '',
+            enableCustomRename: document.getElementById('enableCustomRename')?.checked || false,
+            customRenamePattern: document.getElementById('customRenamePattern')?.value || ''
+        };
+
+        try {
+            const response = await fetch('/api/config/file-processing', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            const result = await response.json();
+
+            if (result.success) {
+                showToast('File processing settings saved', 'success');
+            } else {
+                showToast('Error: ' + (result.error || 'Failed to save'), 'error');
+            }
+        } catch (e) {
+            showToast('Error saving settings: ' + e.message, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+        }
+    }
+
+    async function saveDownloadApiSettings() {
+        const btn = event.target.closest('button');
+        const originalHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving...';
+
+        const data = {
+            customHeaders: document.getElementById('customHeaders')?.value || '',
+            pixeldrainApiKey: document.getElementById('pixeldrainApiKey')?.value || '',
+            comicvineApiKey: document.getElementById('comicvineApiKey')?.value || '',
+            gcdLanguages: document.getElementById('gcdLanguages')?.value || 'en',
+            metronUsername: document.getElementById('metronUsername')?.value || '',
+            metronPassword: document.getElementById('metronPassword')?.value || '',
+            enableAutoRename: document.getElementById('enableAutoRename')?.checked || false,
+            enableAutoMove: document.getElementById('enableAutoMove')?.checked || false,
+            customMovePattern: document.getElementById('customMovePattern')?.value || ''
+        };
+
+        try {
+            const response = await fetch('/api/config/download-api', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            const result = await response.json();
+
+            if (result.success) {
+                showToast('Download & API settings saved', 'success');
+            } else {
+                showToast('Error: ' + (result.error || 'Failed to save'), 'error');
+            }
+        } catch (e) {
+            showToast('Error saving settings: ' + e.message, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+        }
+    }
+
+    async function saveSystemPerfSettings() {
+        const btn = event.target.closest('button');
+        const originalHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving...';
+
+        const data = {
+            operationTimeout: document.getElementById('operationTimeout')?.value || '3600',
+            largeFileThreshold: document.getElementById('largeFileThreshold')?.value || '500',
+            timezone: document.getElementById('timezone')?.value || 'UTC',
+            rebuildFrequency: document.getElementById('rebuildFrequency')?.value || 'disabled',
+            rebuildTime: document.getElementById('rebuildTime')?.value || '02:00',
+            rebuildWeekday: document.getElementById('rebuildWeekday')?.value || '0',
+            syncFrequency: document.getElementById('syncFrequency')?.value || 'disabled',
+            syncTime: document.getElementById('syncTime')?.value || '03:00',
+            syncWeekday: document.getElementById('syncWeekday')?.value || '0',
+            getcomicsFrequency: document.getElementById('getcomicsFrequency')?.value || 'disabled',
+            getcomicsTime: document.getElementById('getcomicsTime')?.value || '04:00',
+            getcomicsWeekday: document.getElementById('getcomicsWeekday')?.value || '0',
+            ignored_terms: document.getElementById('ignored_terms')?.value || '',
+            ignored_files: document.getElementById('ignored_files')?.value || '',
+            enableDebugLogging: document.getElementById('enableDebugLogging')?.checked || false,
+            xmlYear: document.getElementById('xmlYear')?.checked || false,
+            xmlMarkdown: document.getElementById('xmlMarkdown')?.checked || false,
+            xmlList: document.getElementById('xmlList')?.checked || false
+        };
+
+        try {
+            const response = await fetch('/api/config/system-perf', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            const result = await response.json();
+
+            if (result.success) {
+                showToast('System & Performance settings saved', 'success');
+            } else {
+                showToast('Error: ' + (result.error || 'Failed to save'), 'error');
+            }
+        } catch (e) {
+            showToast('Error saving settings: ' + e.message, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+        }
+    }
+
+    async function saveStylingSettings() {
+        const btn = event.target.closest('button');
+        const originalHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving...';
+
+        const data = {
+            bootstrapTheme: document.getElementById('bootstrapTheme')?.value || 'darkly'
+        };
+
+        try {
+            const response = await fetch('/api/config/styling', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            const result = await response.json();
+
+            if (result.success) {
+                showToast('Styling settings saved', 'success');
+            } else {
+                showToast('Error: ' + (result.error || 'Failed to save'), 'error');
+            }
+        } catch (e) {
+            showToast('Error saving settings: ' + e.message, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+        }
+    }
+
+    async function saveRecommendationSettings() {
+        const btn = event.target.closest('button');
+        const originalHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving...';
+
+        const data = {
+            recEnabled: document.getElementById('recEnabled')?.checked || false,
+            recProvider: document.getElementById('recProvider')?.value || 'openai',
+            recApiKey: document.getElementById('recApiKey')?.value || '',
+            recModel: document.getElementById('recModel')?.value || ''
+        };
+
+        try {
+            const response = await fetch('/api/config/recommendations', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            const result = await response.json();
+
+            if (result.success) {
+                showToast('Recommendation settings saved', 'success');
+            } else {
+                showToast('Error: ' + (result.error || 'Failed to save'), 'error');
+            }
+        } catch (e) {
+            showToast('Error saving settings: ' + e.message, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+        }
     }
 
     document.addEventListener("DOMContentLoaded", function () {
@@ -1924,6 +2166,8 @@
     document.addEventListener('DOMContentLoaded', function () {
         libraryModal = new bootstrap.Modal(document.getElementById('libraryModal'));
         loadLibraries();
+        loadProviders();
+        loadLibraryProviders();
     });
 
     async function loadLibraries() {
@@ -2076,6 +2320,471 @@
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    // =========================================
+    // Metadata Provider Management Functions
+    // =========================================
+
+    async function loadProviders() {
+        const container = document.getElementById('providersCredentialsList');
+        try {
+            const response = await fetch('/api/providers');
+            const data = await response.json();
+
+            if (!data.success) {
+                container.innerHTML = '<div class="alert alert-danger">Failed to load providers</div>';
+                return;
+            }
+
+            if (data.providers.length === 0) {
+                container.innerHTML = '<div class="alert alert-warning">No providers available</div>';
+                return;
+            }
+
+            let html = '<div class="row">';
+            for (const provider of data.providers) {
+                // Status badge logic - different for auth-free providers
+                let statusBadge;
+                if (provider.is_valid) {
+                    statusBadge = '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Connected</span>';
+                } else if (!provider.requires_auth) {
+                    statusBadge = provider.has_credentials
+                        ? '<span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>Test Failed</span>'
+                        : '<span class="badge bg-info"><i class="bi bi-globe me-1"></i>Public API</span>';
+                } else {
+                    statusBadge = provider.has_credentials
+                        ? '<span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>Not Verified</span>'
+                        : '<span class="badge bg-secondary"><i class="bi bi-x-circle me-1"></i>Not Configured</span>';
+                }
+
+                const lastTested = provider.last_tested
+                    ? `<small class="text-muted">Last tested: ${new Date(provider.last_tested).toLocaleString()}</small>`
+                    : '';
+
+                // Different card body for auth-free vs auth-required providers
+                let cardBody;
+                if (!provider.requires_auth) {
+                    // Auth-free provider - no credential fields, just test button
+                    cardBody = `
+                        <p class="text-muted small mb-3">
+                            <i class="bi bi-info-circle me-1"></i>No authentication required - public API
+                        </p>
+                        <div class="d-flex gap-2">
+                            <button type="button" class="btn ${provider.is_valid ? 'btn-outline-info' : 'btn-primary'} btn-sm" onclick="testProviderConnection('${provider.type}')">
+                                <i class="bi bi-lightning me-1"></i>${provider.is_valid ? 'Test' : 'Enable Provider'}
+                            </button>
+                            ${provider.has_credentials ? `
+                            <button type="button" class="btn btn-outline-danger btn-sm" onclick="deleteProviderCredentials('${provider.type}')">
+                                <i class="bi bi-trash me-1"></i>Remove
+                            </button>` : ''}
+                        </div>`;
+                } else {
+                    // Auth-required provider - show credential form
+                    cardBody = `
+                        <form id="provider-form-${provider.type}" onsubmit="saveProviderCredentials('${provider.type}', event); return false;">
+                            ${generateProviderFields(provider)}
+                            <div class="mt-3 d-flex gap-2">
+                                <button type="submit" class="btn btn-primary btn-sm">
+                                    <i class="bi bi-floppy me-1"></i>Save
+                                </button>
+                                <button type="button" class="btn btn-outline-info btn-sm" onclick="testProviderConnection('${provider.type}')">
+                                    <i class="bi bi-lightning me-1"></i>Test
+                                </button>
+                                ${provider.has_credentials ? `
+                                <button type="button" class="btn btn-outline-danger btn-sm" onclick="deleteProviderCredentials('${provider.type}')">
+                                    <i class="bi bi-trash me-1"></i>Delete
+                                </button>` : ''}
+                            </div>
+                        </form>`;
+                }
+
+                html += `
+                    <div class="col-md-6 mb-3">
+                        <div class="card h-100">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <strong>${escapeHtml(provider.name)}</strong>
+                                ${statusBadge}
+                            </div>
+                            <div class="card-body">
+                                ${cardBody}
+                                ${lastTested}
+                            </div>
+                            <div class="card-footer text-muted small">
+                                Rate limit: ${provider.rate_limit} requests/minute
+                            </div>
+                        </div>
+                    </div>`;
+            }
+            html += '</div>';
+            container.innerHTML = html;
+            // Reinitialize password toggle buttons for dynamically created elements
+            initPasswordToggles(container);
+        } catch (e) {
+            container.innerHTML = '<div class="alert alert-danger">Error loading providers: ' + escapeHtml(e.message) + '</div>';
+        }
+    }
+
+    function initPasswordToggles(container) {
+        container.querySelectorAll('.toggle-password').forEach(function (button) {
+            button.addEventListener('click', function () {
+                const targetId = this.getAttribute('data-target');
+                const input = document.getElementById(targetId);
+                const icon = this.querySelector('i');
+
+                if (input.type === 'password') {
+                    input.type = 'text';
+                    icon.classList.remove('bi-eye');
+                    icon.classList.add('bi-eye-slash');
+                } else {
+                    input.type = 'password';
+                    icon.classList.remove('bi-eye-slash');
+                    icon.classList.add('bi-eye');
+                }
+            });
+        });
+    }
+
+    function generateProviderFields(provider) {
+        let html = '';
+        for (const field of provider.auth_fields) {
+            const fieldId = `provider-${provider.type}-${field}`;
+            const fieldLabel = field.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+            const isPassword = field.toLowerCase().includes('password') || field.toLowerCase().includes('key') || field.toLowerCase().includes('api');
+            const inputType = isPassword ? 'password' : 'text';
+            const maskedValue = provider.credentials_masked && provider.credentials_masked[field] ? provider.credentials_masked[field] : '';
+
+            html += `
+                <div class="mb-2">
+                    <label for="${fieldId}" class="form-label small">${fieldLabel}</label>
+                    <div class="input-group input-group-sm">
+                        <input type="${inputType}" class="form-control ${isPassword ? 'password-field' : ''}"
+                               id="${fieldId}" name="${field}" placeholder="${maskedValue || 'Enter ' + fieldLabel.toLowerCase()}"
+                               ${provider.has_credentials ? 'data-has-existing="true"' : ''}
+                               autocomplete="${field.toLowerCase().includes('password') ? 'current-password' : 'off'}">
+                        ${isPassword ? `
+                        <button class="btn btn-outline-secondary toggle-password" type="button" data-target="${fieldId}">
+                            <i class="bi bi-eye"></i>
+                        </button>` : ''}
+                    </div>
+                </div>`;
+        }
+        return html;
+    }
+
+    async function saveProviderCredentials(providerType, event) {
+        // Prevent form submission
+        if (event) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+
+        const form = document.getElementById(`provider-form-${providerType}`);
+        const submitBtn = form.querySelector('button[type="submit"]');
+        const originalBtnHtml = submitBtn.innerHTML;
+
+        // Show loading state
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving...';
+
+        const formData = new FormData(form);
+        const credentials = {};
+
+        for (const [key, value] of formData.entries()) {
+            if (value.trim()) {
+                credentials[key] = value.trim();
+            }
+        }
+
+        // Check if any credentials were provided
+        if (Object.keys(credentials).length === 0) {
+            showToast('Please enter at least one credential field', 'warning');
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = originalBtnHtml;
+            return false;
+        }
+
+        try {
+            const response = await fetch(`/api/providers/${providerType}/credentials`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(credentials)
+            });
+            const data = await response.json();
+
+            if (data.success) {
+                showToast(`Credentials saved for ${providerType}`, 'success');
+                // Clear form fields after successful save
+                form.querySelectorAll('input').forEach(input => input.value = '');
+                loadProviders();
+                loadLibraryProviders();
+            } else {
+                showToast('Error: ' + (data.error || 'Failed to save credentials'), 'error');
+            }
+        } catch (e) {
+            showToast('Error saving credentials: ' + e.message, 'error');
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = originalBtnHtml;
+        }
+        return false;
+    }
+
+    async function testProviderConnection(providerType) {
+        const btn = event.target.closest('button');
+        const originalHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Testing...';
+
+        try {
+            const response = await fetch(`/api/providers/${providerType}/test`, {
+                method: 'POST'
+            });
+            const data = await response.json();
+
+            if (data.success && data.valid) {
+                btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Success!';
+                btn.classList.remove('btn-outline-info');
+                btn.classList.add('btn-success');
+                showToast(`Connection to ${providerType} successful!`, 'success');
+                setTimeout(() => {
+                    loadProviders();
+                }, 1500);
+            } else {
+                btn.innerHTML = '<i class="bi bi-x-circle me-1"></i>Failed';
+                btn.classList.remove('btn-outline-info');
+                btn.classList.add('btn-danger');
+                showToast('Connection test failed: ' + (data.error || 'Unknown error'), 'error');
+                setTimeout(() => {
+                    btn.innerHTML = originalHtml;
+                    btn.classList.remove('btn-danger');
+                    btn.classList.add('btn-outline-info');
+                    btn.disabled = false;
+                }, 2000);
+            }
+        } catch (e) {
+            btn.innerHTML = originalHtml;
+            btn.disabled = false;
+            showToast('Error testing connection: ' + e.message, 'error');
+        }
+    }
+
+    async function deleteProviderCredentials(providerType) {
+        if (!confirm('Are you sure you want to delete credentials for this provider?')) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/providers/${providerType}/credentials`, {
+                method: 'DELETE'
+            });
+            const data = await response.json();
+
+            if (data.success) {
+                showToast(`Credentials deleted for ${providerType}`, 'success');
+                loadProviders();
+                loadLibraryProviders();
+            } else {
+                showToast('Error: ' + (data.error || 'Failed to delete credentials'), 'error');
+            }
+        } catch (e) {
+            showToast('Error deleting credentials: ' + e.message, 'error');
+        }
+    }
+
+    async function loadLibraryProviders() {
+        const container = document.getElementById('libraryProvidersList');
+        try {
+            // Get libraries first
+            const libResponse = await fetch('/api/libraries?all=true');
+            const libData = await libResponse.json();
+
+            if (!libData.success || libData.libraries.length === 0) {
+                container.innerHTML = '<div class="alert alert-info">Add libraries first to configure their metadata providers.</div>';
+                return;
+            }
+
+            // Get available providers
+            const provResponse = await fetch('/api/providers');
+            const provData = await provResponse.json();
+
+            if (!provData.success) {
+                container.innerHTML = '<div class="alert alert-danger">Failed to load providers</div>';
+                return;
+            }
+
+            // Filter to only configured/enabled providers (has_credentials includes auth-free providers that were tested)
+            const configuredProviders = provData.providers.filter(p => p.has_credentials || p.is_valid);
+            if (configuredProviders.length === 0) {
+                container.innerHTML = '<div class="alert alert-info">No providers enabled yet. Configure credentials for auth-required providers, or click "Enable Provider" for public API providers above.</div>';
+                return;
+            }
+
+            let html = '<div class="accordion" id="libraryProvidersAccordion">';
+            for (const lib of libData.libraries) {
+                // Get library's current provider config
+                const libProvResponse = await fetch(`/api/libraries/${lib.id}/providers`);
+                const libProvData = await libProvResponse.json();
+                const libraryProviders = libProvData.success ? libProvData.providers : [];
+
+                html += `
+                    <div class="accordion-item">
+                        <h2 class="accordion-header" id="heading-lib-${lib.id}">
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                                    data-bs-target="#collapse-lib-${lib.id}" aria-expanded="false" aria-controls="collapse-lib-${lib.id}">
+                                <strong>${escapeHtml(lib.name)}</strong>
+                                <span class="badge bg-info ms-2">${libraryProviders.length} provider(s)</span>
+                            </button>
+                        </h2>
+                        <div id="collapse-lib-${lib.id}" class="accordion-collapse collapse" aria-labelledby="heading-lib-${lib.id}"
+                             data-bs-parent="#libraryProvidersAccordion">
+                            <div class="accordion-body">
+                                <p class="text-muted small">Select and order metadata providers for this library. Higher priority providers are tried first.</p>
+                                <div id="library-providers-${lib.id}">
+                                    ${generateLibraryProviderCheckboxes(lib.id, configuredProviders, libraryProviders)}
+                                </div>
+                                <button type="button" class="btn btn-primary btn-sm mt-2"
+                                        onclick="saveLibraryProviders(${lib.id})">
+                                    <i class="bi bi-floppy me-1"></i>Save Provider Settings
+                                </button>
+                            </div>
+                        </div>
+                    </div>`;
+            }
+            html += '</div>';
+            container.innerHTML = html;
+        } catch (e) {
+            container.innerHTML = '<div class="alert alert-danger">Error loading library providers: ' + escapeHtml(e.message) + '</div>';
+        }
+    }
+
+    function generateLibraryProviderCheckboxes(libraryId, availableProviders, currentProviders) {
+        let html = '<div class="list-group">';
+
+        // Create a map of current providers with their priorities
+        const currentMap = {};
+        currentProviders.forEach((p, idx) => {
+            currentMap[p.provider_type] = { enabled: p.enabled, priority: p.priority ?? idx };
+        });
+
+        // Sort available providers: enabled first (by priority), then disabled
+        const sortedProviders = [...availableProviders].sort((a, b) => {
+            const aEnabled = currentMap[a.type]?.enabled;
+            const bEnabled = currentMap[b.type]?.enabled;
+            if (aEnabled && !bEnabled) return -1;
+            if (!aEnabled && bEnabled) return 1;
+            if (aEnabled && bEnabled) {
+                return (currentMap[a.type]?.priority ?? 999) - (currentMap[b.type]?.priority ?? 999);
+            }
+            return 0;
+        });
+
+        for (const provider of sortedProviders) {
+            const isEnabled = currentMap[provider.type]?.enabled ?? false;
+            const priority = currentMap[provider.type]?.priority ?? 999;
+
+            html += `
+                <div class="list-group-item d-flex justify-content-between align-items-center"
+                     data-provider-type="${provider.type}" data-priority="${priority}">
+                    <div class="form-check">
+                        <input class="form-check-input library-provider-check" type="checkbox"
+                               id="lib-${libraryId}-prov-${provider.type}"
+                               data-library-id="${libraryId}" data-provider-type="${provider.type}"
+                               ${isEnabled ? 'checked' : ''}>
+                        <label class="form-check-label" for="lib-${libraryId}-prov-${provider.type}">
+                            ${escapeHtml(provider.name)}
+                            ${provider.is_valid ? '<i class="bi bi-check-circle-fill text-success ms-1"></i>' : ''}
+                        </label>
+                    </div>
+                    <div class="btn-group btn-group-sm">
+                        <button type="button" class="btn btn-outline-secondary" onclick="moveProviderUp(${libraryId}, '${provider.type}')" title="Move up">
+                            <i class="bi bi-arrow-up"></i>
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary" onclick="moveProviderDown(${libraryId}, '${provider.type}')" title="Move down">
+                            <i class="bi bi-arrow-down"></i>
+                        </button>
+                    </div>
+                </div>`;
+        }
+        html += '</div>';
+        return html;
+    }
+
+    function moveProviderUp(libraryId, providerType) {
+        const container = document.getElementById(`library-providers-${libraryId}`);
+        const items = container.querySelectorAll('.list-group-item');
+        const itemsArray = Array.from(items);
+        const currentIndex = itemsArray.findIndex(item => item.dataset.providerType === providerType);
+
+        if (currentIndex > 0) {
+            const currentItem = itemsArray[currentIndex];
+            const previousItem = itemsArray[currentIndex - 1];
+            currentItem.parentNode.insertBefore(currentItem, previousItem);
+        }
+    }
+
+    function moveProviderDown(libraryId, providerType) {
+        const container = document.getElementById(`library-providers-${libraryId}`);
+        const items = container.querySelectorAll('.list-group-item');
+        const itemsArray = Array.from(items);
+        const currentIndex = itemsArray.findIndex(item => item.dataset.providerType === providerType);
+
+        if (currentIndex < itemsArray.length - 1) {
+            const currentItem = itemsArray[currentIndex];
+            const nextItem = itemsArray[currentIndex + 1];
+            currentItem.parentNode.insertBefore(nextItem, currentItem);
+        }
+    }
+
+    async function saveLibraryProviders(libraryId) {
+        const container = document.getElementById(`library-providers-${libraryId}`);
+        const items = container.querySelectorAll('.list-group-item');
+        const providers = [];
+
+        items.forEach((item, index) => {
+            const providerType = item.dataset.providerType;
+            const checkbox = item.querySelector('.library-provider-check');
+            providers.push({
+                provider_type: providerType,
+                priority: index,
+                enabled: checkbox.checked
+            });
+        });
+
+        const btn = event.target.closest('button');
+        const originalHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving...';
+
+        try {
+            const response = await fetch(`/api/libraries/${libraryId}/providers`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ providers })
+            });
+            const data = await response.json();
+
+            if (data.success) {
+                showToast('Library provider settings saved', 'success');
+                btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Saved!';
+                btn.classList.remove('btn-primary');
+                btn.classList.add('btn-success');
+                setTimeout(() => {
+                    btn.innerHTML = originalHtml;
+                    btn.classList.remove('btn-success');
+                    btn.classList.add('btn-primary');
+                    btn.disabled = false;
+                }, 1500);
+            } else {
+                showToast('Error: ' + (data.error || 'Failed to save settings'), 'error');
+                btn.innerHTML = originalHtml;
+                btn.disabled = false;
+            }
+        } catch (e) {
+            showToast('Error saving library providers: ' + e.message, 'error');
+            btn.innerHTML = originalHtml;
+            btn.disabled = false;
+        }
     }
 </script>
 {% endblock %}
