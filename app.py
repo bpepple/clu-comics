@@ -7449,6 +7449,98 @@ def generate_thumbnail_task(file_path, cache_path):
             conn.commit()
             conn.close()
 
+
+def generate_thumbnail_sync(file_path: str, cache_path: str) -> bool:
+    """
+    Generate a thumbnail synchronously for immediate use.
+    Used by folder thumbnail generation when individual thumbnails don't exist yet.
+
+    Args:
+        file_path: Path to the comic file (CBZ or CBR)
+        cache_path: Where to save the thumbnail
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        import zipfile
+        from PIL import Image
+
+        # Ensure cache directory exists
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+
+        image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'}
+
+        # Handle CBZ files
+        if file_path.lower().endswith(('.cbz', '.zip')):
+            with zipfile.ZipFile(file_path, 'r') as zf:
+                file_list = zf.namelist()
+                image_files = sorted([
+                    f for f in file_list
+                    if os.path.splitext(f.lower())[1] in image_extensions
+                    and not f.startswith('__MACOSX')
+                    and not os.path.basename(f).startswith('.')
+                ], key=str.lower)
+
+                if not image_files:
+                    app_logger.warning(f"No images found in {file_path}")
+                    return False
+
+                with zf.open(image_files[0]) as image_file:
+                    img = Image.open(image_file)
+                    if img.mode in ('RGBA', 'LA', 'P'):
+                        img = img.convert('RGB')
+
+                    # Resize to 300px height
+                    aspect_ratio = img.width / img.height
+                    new_height = 300
+                    new_width = int(new_height * aspect_ratio)
+                    img.thumbnail((new_width, new_height), Image.Resampling.LANCZOS)
+
+                    img.save(cache_path, format='JPEG', quality=85)
+                    app_logger.info(f"Generated thumbnail sync for {file_path}")
+                    return True
+
+        # Handle CBR files
+        elif file_path.lower().endswith('.cbr'):
+            import rarfile
+            with rarfile.RarFile(file_path, 'r') as rf:
+                file_list = rf.namelist()
+                image_files = sorted([
+                    f for f in file_list
+                    if os.path.splitext(f.lower())[1] in image_extensions
+                    and not f.startswith('__MACOSX')
+                    and not os.path.basename(f).startswith('.')
+                ], key=str.lower)
+
+                if not image_files:
+                    app_logger.warning(f"No images found in {file_path}")
+                    return False
+
+                with rf.open(image_files[0]) as image_file:
+                    img = Image.open(image_file)
+                    if img.mode in ('RGBA', 'LA', 'P'):
+                        img = img.convert('RGB')
+
+                    # Resize to 300px height
+                    aspect_ratio = img.width / img.height
+                    new_height = 300
+                    new_width = int(new_height * aspect_ratio)
+                    img.thumbnail((new_width, new_height), Image.Resampling.LANCZOS)
+
+                    img.save(cache_path, format='JPEG', quality=85)
+                    app_logger.info(f"Generated thumbnail sync for {file_path}")
+                    return True
+
+        else:
+            app_logger.warning(f"Unsupported file type: {file_path}")
+            return False
+
+    except Exception as e:
+        app_logger.error(f"generate_thumbnail_sync failed for {file_path}: {e}")
+        return False
+
+
 @app.route('/api/thumbnail')
 def get_thumbnail():
     """Serve or generate thumbnail for a file."""
@@ -7625,9 +7717,16 @@ def generate_folder_thumbnail():
 
             if os.path.exists(cache_path):
                 cached_thumbs.append(cache_path)
+            else:
+                # Generate thumbnail synchronously if missing
+                try:
+                    if generate_thumbnail_sync(file_path, cache_path):
+                        cached_thumbs.append(cache_path)
+                except Exception as e:
+                    app_logger.warning(f"Failed to generate thumbnail for {file_path}: {e}")
 
         if not cached_thumbs:
-            return jsonify({"error": "No cached thumbnails found. Please wait for thumbnails to generate."}), 400
+            return jsonify({"error": "Could not generate any thumbnails for comics in this folder"}), 400
 
         # Create fanned stack thumbnail
         CANVAS_SIZE = (200, 300)
@@ -7801,6 +7900,13 @@ def generate_folder_thumbnail_internal(folder_path):
 
             if os.path.exists(cache_path):
                 cached_thumbs.append(cache_path)
+            else:
+                # Generate thumbnail synchronously if missing
+                try:
+                    if generate_thumbnail_sync(file_path, cache_path):
+                        cached_thumbs.append(cache_path)
+                except Exception as e:
+                    app_logger.warning(f"Failed to generate thumbnail for {file_path}: {e}")
 
         if not cached_thumbs:
             return False
