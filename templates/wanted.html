@@ -139,7 +139,9 @@
                                 </td>
                                 <td class="text-end pe-4">
                                     <button class="btn btn-sm btn-outline-primary me-1"
-                                        onclick="searchGetComics('{{ item.series_name|e }}', '{{ item.issue.number }}')"
+                                        data-series="{{ item.series_name }}"
+                                        data-issue="{{ item.issue.number }}"
+                                        onclick="searchGetComics(this.dataset.series, this.dataset.issue)"
                                         title="Search GetComics">
                                         <i class="bi bi-search"></i>
                                     </button>

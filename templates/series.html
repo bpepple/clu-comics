@@ -313,7 +313,9 @@
                                 <!-- Not found - show search with mark dropdown -->
                                 <div class="btn-group" role="group">
                                     <button class="btn btn-sm btn-outline-primary"
-                                        onclick="searchGetComics('{{ series.name|e }}', '{{ issue.number }}')"
+                                        data-series="{{ series.name }}"
+                                        data-issue="{{ issue.number }}"
+                                        onclick="searchGetComics(this.dataset.series, this.dataset.issue)"
                                         title="Search GetComics">
                                         <i class="bi bi-search"></i>
                                     </button>
