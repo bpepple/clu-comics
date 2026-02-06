@@ -24,7 +24,8 @@ from .base import (
     ProviderType,
     ProviderCredentials,
     SearchResult,
-    IssueResult
+    IssueResult,
+    extract_issue_number
 )
 
 # Registry of provider implementations
@@ -166,6 +167,7 @@ __all__ = [
     'ProviderCredentials',
     'SearchResult',
     'IssueResult',
+    'extract_issue_number',
     # Registry functions
     'register_provider',
     'get_provider',

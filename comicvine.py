@@ -731,47 +731,8 @@ def get_volume_details(api_key: str, volume_id: int) -> Dict[str, Any]:
         return result
 
 
-def extract_issue_number(filename: str) -> Optional[str]:
-    """
-    Extract issue number from a comic filename.
-
-    Handles patterns like:
-    - "Amazing Spider-Man 001.cbz" -> "1"
-    - "Batman #42.cbz" -> "42"
-    - "X-Men v2 012.cbz" -> "12"
-
-    Args:
-        filename: Comic filename
-
-    Returns:
-        Issue number as string, or None if not found
-    """
-    import re
-
-    # Remove extension
-    name = os.path.splitext(filename)[0]
-
-    # Pattern: look for issue number (often at end, with or without #)
-    # Try various patterns
-    patterns = [
-        r'#(\d+(?:\.\d+)?)',           # #42 or #42.1
-        r'\s+(\d{3,})(?:\s|$)',         # Space + 3+ digits (001, 012)
-        r'\s+(\d{1,2})(?:\s|$)',        # Space + 1-2 digits at end
-        r'[-_](\d+)(?:\s|$)',           # Dash/underscore + digits
-    ]
-
-    for pattern in patterns:
-        match = re.search(pattern, name)
-        if match:
-            # Remove leading zeros but preserve decimal parts
-            num_str = match.group(1)
-            if '.' in num_str:
-                parts = num_str.split('.')
-                return str(int(parts[0])) + '.' + parts[1]
-            else:
-                return str(int(num_str))
-
-    return None
+# Re-export from shared provider base for backward compatibility
+from models.providers.base import extract_issue_number  # noqa: F811
 
 
 def add_comicinfo_to_archive(file_path: str, xml_content) -> bool:

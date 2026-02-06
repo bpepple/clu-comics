@@ -35,7 +35,8 @@
       "Bash(grep:*)",
       "Bash(python3:*)",
       "WebFetch(domain:gethomepage.dev)",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "Bash(gh issue view:*)"
     ],
     "deny": [],
     "ask": []

@@ -5382,7 +5382,8 @@ def auto_fetch_metron_metadata(destination_path):
             is_mokkari_available, get_api, get_series_id,
             get_issue_metadata, map_to_comicinfo
         )
-        from comicvine import extract_issue_number, generate_comicinfo_xml, add_comicinfo_to_archive
+        from models.providers.base import extract_issue_number
+        from comicvine import generate_comicinfo_xml, add_comicinfo_to_archive
         from comicinfo import read_comicinfo_from_zip
         from rename import load_custom_rename_config
 
@@ -12126,13 +12127,9 @@ def search_comicvine_metadata():
         if cvinfo_path:
             app_logger.info(f"Found cvinfo file at {cvinfo_path}")
 
-            # Parse issue number from filename first (needed for cvinfo lookup)
-            name_without_ext = file_name
-            for ext in ('.cbz', '.cbr', '.zip'):
-                name_without_ext = name_without_ext.replace(ext, '')
-
-            # Extract issue number using comicvine helper
-            issue_number = comicvine.extract_issue_number(name_without_ext)
+            # Extract issue number from filename (handles extension removal internally)
+            issue_number = comicvine.extract_issue_number(file_name)
+            name_without_ext = os.path.splitext(file_name)[0]
             if not issue_number:
                 issue_number = "1"  # Default for graphic novels/one-shots
 

@@ -4,6 +4,8 @@ Base classes and data types for metadata providers.
 This module defines the abstract base class that all metadata providers must implement,
 along with unified data classes for search results and issue data.
 """
+import os
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional, List, Dict, Any
@@ -106,6 +108,50 @@ class ProviderCredentials:
             port=data.get("port"),
             database=data.get("database")
         )
+
+
+def extract_issue_number(filename: str) -> Optional[str]:
+    """
+    Extract issue number from a comic filename.
+
+    Handles patterns like:
+    - "Amazing Spider-Man (2018) Issue 080.BEY.cbz" -> "80.BEY"
+    - "Amazing Spider-Man (1999) Issue 700.1.cbz" -> "700.1"
+    - "Amazing Spider-Man 078.BEY (2022).cbz" -> "78.BEY"
+    - "Amazing Spider-Man 001.cbz" -> "1"
+    - "Batman #42.cbz" -> "42"
+    - "X-Men v2 012.cbz" -> "12"
+
+    Args:
+        filename: Comic filename
+
+    Returns:
+        Issue number as string, or None if not found
+    """
+    # Remove extension
+    name = os.path.splitext(filename)[0]
+
+    # Try various patterns (ordered by specificity)
+    patterns = [
+        r'\b[Ii]ssue\s+(\d+(?:\.\w+)?)',  # Issue 080, Issue 700.1, Issue 080.BEY
+        r'#(\d+(?:\.\w+)?)',               # #42 or #42.1 or #42.BEY
+        r'\s+(\d{3,}(?:\.\w+)?)(?:\s|$)',   # Space + 3+ digits (001, 078.BEY, 050.LR)
+        r'\s+(\d{1,2}(?:\.\w+)?)(?:\s|$)', # Space + 1-2 digits at end
+        r'[-_](\d+(?:\.\w+)?)(?:\s|$)',    # Dash/underscore + digits
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, name)
+        if match:
+            # Remove leading zeros but preserve decimal/suffix parts
+            num_str = match.group(1)
+            if '.' in num_str:
+                parts = num_str.split('.', 1)
+                return str(int(parts[0])) + '.' + parts[1]
+            else:
+                return str(int(num_str))
+
+    return None
 
 
 class BaseProvider(ABC):
