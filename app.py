@@ -87,12 +87,12 @@ def basename_filter(path):
 
 def generate_series_slug(series_name, metron_id, volume=None):
     """
-    Generate a URL-friendly slug for a series page.
+    Generate a URL-friendly slug for a series or issue page.
     Format: series-name-vVOLUME-ID (e.g., amazing-spider-man-v1-4984)
 
-    The metron_id can be either a series_id or issue_id:
-    - From releases page: issue_id (series_view will look up the series via issue)
-    - From series search/pull list: series_id (series_view uses directly)
+    The metron_id is a series_id or issue_id depending on the route:
+    - For issue_view: issue_id (resolves to series_id then redirects)
+    - For series_view: series_id (used directly)
     """
 
     # Ensure we have a valid ID
@@ -2204,18 +2204,64 @@ def match_issues_to_collection(mapped_path, issues, series_info, use_cache=True)
     return results
 
 
+@app.route('/issue/<slug>')
+def issue_view(slug):
+    """
+    Resolve an issue ID to its parent series and redirect to the series view.
+    Used by releases page where we have issue_ids, not series_ids.
+    This avoids calling /api/series/ with an issue_id (which causes 404s on Metron).
+    """
+    match = re.search(r'-(\d+)$', slug)
+    if not match:
+        flash("Invalid issue URL format", "error")
+        return redirect(url_for('releases'))
+
+    issue_id = int(match.group(1))
+
+    # 1. Try DB cache first (no API call needed)
+    from database import get_issue_by_id, get_series_by_id
+    cached_issue = get_issue_by_id(issue_id)
+    if cached_issue:
+        series_id = cached_issue['series_id']
+        cached_series = get_series_by_id(series_id)
+        if cached_series:
+            series_slug = generate_series_slug(
+                cached_series['name'], series_id, cached_series.get('volume'))
+            return redirect(url_for('series_view', slug=series_slug))
+
+    # 2. Not cached — call api.issue() to resolve series_id
+    api = None
+    if metron.is_mokkari_available():
+        metron_username = app.config.get("METRON_USERNAME", "").strip()
+        metron_password = app.config.get("METRON_PASSWORD", "").strip()
+        if metron_username and metron_password:
+            api = metron.get_api(metron_username, metron_password)
+
+    if not api:
+        flash("Metron API not configured", "error")
+        return redirect(url_for('releases'))
+
+    try:
+        full_issue = api.issue(issue_id)
+        series_id = full_issue.series.id
+        series_name = full_issue.series.name
+        series_volume = getattr(full_issue.series, 'volume', None)
+
+        series_slug = generate_series_slug(series_name, series_id, series_volume)
+        return redirect(url_for('series_view', slug=series_slug))
+    except Exception as e:
+        app_logger.error(f"Could not resolve issue {issue_id}: {e}")
+        flash("Issue not found on Metron", "error")
+        return redirect(url_for('releases'))
+
+
 @app.route('/series/<slug>')
 def series_view(slug):
     """
     View all issues in a series.
     URL format: /series/series-name-vVOLUME-ID (e.g., /series/amazing-spider-man-v1-4984)
-    The ID at the end can be either a series_id or an issue_id.
-
-    Lookup order (to minimize API 404s):
-    1. Check local DB cache for series_id
-    2. Check local DB cache for issue_id (to get series_id)
-    3. API: Try as issue_id first (common case from releases page)
-    4. API: Fall back to series_id (for series search links)
+    The ID in the slug is always a series_id. Issue IDs are handled by issue_view
+    which resolves them to series_ids first.
 
     Uses cached data if available and recently synced, otherwise fetches from API.
     """
@@ -2229,29 +2275,16 @@ def series_view(slug):
         flash("Invalid series URL format", "error")
         return redirect(url_for('releases'))
 
-    slug_id = int(match.group(1))
+    series_id = int(match.group(1))
 
     # Check for force refresh parameter
     force_refresh = request.args.get('refresh', '').lower() in ('1', 'true', 'yes')
 
-    # First, try to look up as a series_id (preferred for wanted page links and series search)
-    from database import get_issue_by_id
     cached_series = None
-    cached_issue = None
-    series_id = None
-
     if not force_refresh:
-        cached_series = get_series_by_id(slug_id)
-        series_id = slug_id if cached_series else None
-
-        # If not found as series, try to look up as an issue_id (for releases page links)
-        if not series_id:
-            cached_issue = get_issue_by_id(slug_id)
-            series_id = cached_issue['series_id'] if cached_issue else None
-            if series_id:
-                cached_series = get_series_by_id(series_id)
+        cached_series = get_series_by_id(series_id)
     else:
-        app_logger.info(f"Force refresh requested for slug_id {slug_id}, skipping cache")
+        app_logger.info(f"Force refresh requested for series {series_id}, skipping cache")
 
     # Check for cached series with recent sync (within 24 hours)
     use_cache = False
@@ -2300,28 +2333,10 @@ def series_view(slug):
             app_logger.info(f"Loaded {len(all_issues)} cached issues")
 
         else:
-            # Fetch from API - slug_id could be a series_id or issue_id
-            # If we already have a series_id from cache lookup, use it directly
-            if series_id:
-                app_logger.info(f"Fetching series details for series_id: {series_id}")
-                series_info = api.series(series_id)
-            else:
-                # slug_id not found in database - try as series first (most common case),
-                # then fall back to issue lookup (for releases page links)
-                # Series lookup is preferred because series_search, pull-list, and wanted
-                # pages all use series_id, only releases.html uses issue_id
-                app_logger.info(f"Trying to fetch slug_id {slug_id} as series first...")
-                try:
-                    series_info = api.series(slug_id)
-                    series_id = slug_id
-                    app_logger.info(f"Successfully fetched as series_id: {series_id}")
-                except Exception as e:
-                    app_logger.info(f"Not a valid series_id, trying as issue_id: {e}")
-                    # Try as issue (for releases page which links with issue_id)
-                    full_issue = api.issue(slug_id)
-                    series_id = full_issue.series.id
-                    app_logger.info(f"Got series_id: {series_id} from issue {slug_id}")
-                    series_info = api.series(series_id)
+            # Fetch from API — series_id is always a series_id here
+            # (issue IDs are resolved to series_ids by issue_view before redirecting)
+            app_logger.info(f"Fetching series details for series_id: {series_id}")
+            series_info = api.series(series_id)
 
             # Got series_info - log it
             app_logger.info(f"Got series_info: {series_info.name if series_info else 'None'}")

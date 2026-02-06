@@ -31,3 +31,4 @@ readme/156342.json
 /static/cbl
 /sql
 .claude/settings.local.json
+/.claude

@@ -36,7 +36,8 @@
       "Bash(python3:*)",
       "WebFetch(domain:gethomepage.dev)",
       "Bash(dir:*)",
-      "Bash(gh issue view:*)"
+      "Bash(gh issue view:*)",
+      "WebFetch(domain:mokkari.readthedocs.io)"
     ],
     "deny": [],
     "ask": []

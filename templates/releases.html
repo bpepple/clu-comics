@@ -46,10 +46,10 @@
     {% if releases %}
     <div class="releases-grid">
         {% for issue in releases %}
-        {% set series_slug = generate_series_slug(issue.series.name, issue.id, issue.series.volume) %}
+        {% set issue_slug = generate_series_slug(issue.series.name, issue.id, issue.series.volume) %}
         {% set is_tracked = (normalize_name(issue.series.name), issue.series.volume or 0) in tracked_lookup %}
-        <a href="{% if series_slug %}{{ url_for('series_view', slug=series_slug) }}{% else %}{{ issue.resource_url }}{% endif %}"
-            {% if not series_slug %}target="_blank" {% endif %}
+        <a href="{% if issue_slug %}{{ url_for('issue_view', slug=issue_slug) }}{% else %}{{ issue.resource_url }}{% endif %}"
+            {% if not series_slug %} {% endif %}
             class="release-card stagger-load{% if is_tracked %} tracked{% endif %}">
             <!-- Cover Image -->
             <div class="release-cover">
