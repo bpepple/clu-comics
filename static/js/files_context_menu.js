@@ -346,37 +346,35 @@ function deleteMultipleFiles() {
   const modal = bootstrap.Modal.getInstance(document.getElementById('deleteMultipleModal'));
   if (modal) modal.hide();
 
-  // Delete each file
-  let deletePromises = filePaths.map(filePath => {
-    return fetch('/delete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ target: filePath })
-    })
-    .then(response => response.json())
-    .then(result => {
+  // Single bulk request instead of N individual requests
+  fetch('/api/delete-multiple', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ targets: filePaths })
+  })
+  .then(response => response.json())
+  .then(data => {
+    if (!data.results) {
+      console.error('Unexpected response:', data);
+      return;
+    }
+
+    const container = contextMenuPanel === 'source'
+      ? document.getElementById('source-list')
+      : document.getElementById('destination-list');
+
+    // Remove successfully deleted items from UI
+    data.results.forEach(result => {
       if (result.success) {
-        // Remove from UI
-        const container = contextMenuPanel === 'source'
-          ? document.getElementById('source-list')
-          : document.getElementById('destination-list');
-        const item = container.querySelector(`li[data-fullpath="${filePath}"]`);
+        const item = container.querySelector(`li[data-fullpath="${result.path}"]`);
         if (item) {
           item.classList.add('deleting');
           setTimeout(() => item.remove(), 200);
         }
-        return { success: true, path: filePath };
-      } else {
-        return { success: false, path: filePath, error: result.error };
       }
-    })
-    .catch(error => {
-      return { success: false, path: filePath, error: error.message };
     });
-  });
 
-  Promise.all(deletePromises).then(results => {
-    const failures = results.filter(r => !r.success);
+    const failures = data.results.filter(r => !r.success);
 
     selectedFiles.clear();
     updateSelectionBadge();
@@ -396,6 +394,10 @@ function deleteMultipleFiles() {
     } else {
       loadDirectories(currentDestinationPath, 'destination');
     }
+  })
+  .catch(error => {
+    console.error('Error deleting files:', error);
+    alert('Error deleting files: ' + error.message);
   });
 }
 

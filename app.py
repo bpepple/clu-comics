@@ -9254,12 +9254,60 @@ def delete():
         else:
             os.remove(target)
 
-        # Update file index incrementally (no cache invalidation needed with DB-first approach)
-        update_index_on_delete(target)
+        # Update file index in background — skip for temp extraction folders (never indexed)
+        if '/.tmp_extract_' not in target.replace('\\', '/'):
+            threading.Thread(target=update_index_on_delete, args=(target,), daemon=True).start()
 
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/delete-multiple', methods=['POST'])
+def delete_multiple():
+    """Bulk-delete multiple files/folders in a single request."""
+    from database import delete_file_index_entries
+
+    data = request.get_json()
+    targets = data.get('targets', [])
+
+    if not targets:
+        return jsonify({"error": "Missing targets"}), 400
+
+    results = []
+    deleted_paths = []
+    dir_paths = []
+
+    for target in targets:
+        if not os.path.exists(target):
+            results.append({"path": target, "success": False, "error": "Not found"})
+            continue
+
+        if is_critical_path(target):
+            results.append({"path": target, "success": False, "error": "Protected path"})
+            continue
+
+        try:
+            is_dir = os.path.isdir(target)
+            if is_dir:
+                shutil.rmtree(target)
+                dir_paths.append(target)
+            else:
+                os.remove(target)
+            deleted_paths.append(target)
+            results.append({"path": target, "success": True})
+        except Exception as e:
+            results.append({"path": target, "success": False, "error": str(e)})
+
+    # Single background DB transaction for all index updates
+    if deleted_paths:
+        threading.Thread(
+            target=delete_file_index_entries,
+            args=(deleted_paths, dir_paths if dir_paths else None),
+            daemon=True
+        ).start()
+
+    return jsonify({"success": True, "results": results})
 
 
 @app.route('/api/update-xml', methods=['POST'])

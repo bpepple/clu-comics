@@ -1448,6 +1448,50 @@ def delete_file_index_entry(path):
         app_logger.error(f"Failed to delete file index entry {path}: {e}")
         return False
 
+
+def delete_file_index_entries(paths, dir_paths=None):
+    """
+    Batch-delete multiple entries from the file index in a single transaction.
+
+    Args:
+        paths: List of full paths to delete
+        dir_paths: Optional subset of paths that are directories (need children cleanup)
+
+    Returns:
+        Number of rows deleted
+    """
+    if not paths:
+        return 0
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return 0
+
+        c = conn.cursor()
+        total_deleted = 0
+
+        # Delete exact path entries
+        c.executemany('DELETE FROM file_index WHERE path = ?', [(p,) for p in paths])
+        total_deleted += c.rowcount
+
+        # Delete children only for directory paths
+        if dir_paths:
+            for dp in dir_paths:
+                c.execute('DELETE FROM file_index WHERE parent = ? OR path LIKE ?', (dp, f"{dp}/%"))
+                total_deleted += c.rowcount
+
+        conn.commit()
+        conn.close()
+
+        if total_deleted > 0:
+            app_logger.debug(f"Batch-deleted {total_deleted} file index entries for {len(paths)} paths")
+        return total_deleted
+
+    except Exception as e:
+        app_logger.error(f"Failed to batch-delete file index entries: {e}")
+        return 0
+
+
 def clear_file_index_from_db():
     """
     Clear all entries from the file index database.
