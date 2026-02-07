@@ -33,7 +33,7 @@ class ComicVineProvider(BaseProvider):
             return None
 
         try:
-            import comicvine as cv_module
+            from models import comicvine as cv_module
             if not cv_module.is_simyan_available():
                 app_logger.warning("Simyan library not available")
                 return None
@@ -73,7 +73,7 @@ class ComicVineProvider(BaseProvider):
             if not api_key:
                 return []
 
-            import comicvine as cv_module
+            from models import comicvine as cv_module
             volumes = cv_module.search_volumes(api_key, query, year)
 
             if not volumes:
@@ -104,7 +104,7 @@ class ComicVineProvider(BaseProvider):
             if not api_key:
                 return None
 
-            import comicvine as cv_module
+            from models import comicvine as cv_module
             details = cv_module.get_volume_details(api_key, int(series_id))
 
             if not details:
@@ -223,7 +223,7 @@ class ComicVineProvider(BaseProvider):
             if not api_key:
                 return None
 
-            import comicvine as cv_module
+            from models import comicvine as cv_module
             return cv_module.get_metadata_by_volume_id(
                 api_key, int(volume_id), issue_number, start_year=start_year
             )
@@ -237,7 +237,7 @@ class ComicVineProvider(BaseProvider):
             api_key = self._get_api_key()
             if api_key and issue.series_id and issue.issue_number:
                 # Get full metadata using the existing function
-                import comicvine as cv_module
+                from models import comicvine as cv_module
                 metadata = cv_module.get_metadata_by_volume_id(
                     api_key,
                     int(issue.series_id),

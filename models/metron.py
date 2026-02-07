@@ -452,6 +452,7 @@ def map_to_comicinfo(issue_data) -> Dict[str, Any]:
         'Manga': 'No',
         'Notes': notes,
         'PageCount': _get_attr(issue_data, 'page', None),
+        'MetronId': _get_attr(issue_data, 'id', None),
     }
 
     # Remove None values
@@ -820,3 +821,116 @@ def create_cvinfo_file(cvinfo_path: str, cv_id: Optional[int], series_id: int,
     except Exception as e:
         app_logger.error(f"Error creating cvinfo file {cvinfo_path}: {e}")
         return False
+
+
+def scrobble_issue(api, metron_issue_id: int, date_read: str = None) -> bool:
+    """
+    Scrobble (mark as read) an issue on Metron.
+
+    Args:
+        api: Mokkari API client
+        metron_issue_id: Metron issue ID to mark as read
+        date_read: Optional ISO timestamp for when the issue was read
+
+    Returns:
+        True if scrobble succeeded, False otherwise
+    """
+    try:
+        from mokkari.schemas.collection import ScrobbleRequest
+    except ImportError:
+        app_logger.warning("ScrobbleRequest not available in installed mokkari version")
+        return False
+
+    try:
+        request = ScrobbleRequest(issue_id=metron_issue_id, date_read=date_read)
+        response = api.collection_scrobble(request)
+        return response is not None
+    except Exception as e:
+        app_logger.error(f"Failed to scrobble issue {metron_issue_id}: {e}")
+        return False
+
+
+def resolve_metron_issue_id(api, comic_path: str, issue_number: str = None) -> Optional[int]:
+    """
+    Get Metron issue ID from ComicInfo.xml or by looking up via series.
+
+    Strategy:
+    1. Check ComicInfo.xml for <MetronId> tag
+    2. If not found, find cvinfo in parent folder to get series_id
+    3. Use get_all_issues_for_series() and match by issue number
+
+    Args:
+        api: Mokkari API client
+        comic_path: Path to the comic file (CBZ)
+        issue_number: Optional issue number (from ComicInfo.xml or filename)
+
+    Returns:
+        Metron issue ID, or None if not resolved
+    """
+    import os
+
+    # Step 1: Check ComicInfo.xml for MetronId
+    try:
+        from comicinfo import read_comicinfo_from_zip
+        if os.path.exists(comic_path) and comic_path.lower().endswith(('.cbz', '.zip')):
+            comic_info = read_comicinfo_from_zip(comic_path)
+            if comic_info:
+                metron_id = comic_info.get('MetronId')
+                if metron_id:
+                    try:
+                        return int(metron_id)
+                    except (ValueError, TypeError):
+                        pass
+                # Also grab issue number from XML if not provided
+                if not issue_number:
+                    issue_number = comic_info.get('Number')
+    except Exception as e:
+        app_logger.warning(f"Could not read ComicInfo.xml for MetronId: {e}")
+
+    # Step 2: Find cvinfo in parent folder to get series_id
+    if not issue_number:
+        # Try extracting from filename as last resort
+        from models.providers.base import extract_issue_number
+        issue_number = extract_issue_number(os.path.basename(comic_path))
+
+    if not issue_number:
+        app_logger.debug(f"Cannot resolve Metron issue ID: no issue number for {comic_path}")
+        return None
+
+    try:
+        from models.comicvine import find_cvinfo_in_folder
+        parent_folder = os.path.dirname(comic_path)
+        cvinfo_path = find_cvinfo_in_folder(parent_folder)
+        if not cvinfo_path:
+            app_logger.debug(f"No cvinfo found in {parent_folder}")
+            return None
+
+        series_id = parse_cvinfo_for_metron_id(cvinfo_path)
+        if not series_id:
+            app_logger.debug(f"No series_id in cvinfo: {cvinfo_path}")
+            return None
+
+        # Step 3: Fetch all issues for the series and match by number
+        all_issues = get_all_issues_for_series(api, series_id)
+        if not all_issues:
+            return None
+
+        # Normalize issue number for comparison (strip leading zeros)
+        target = str(issue_number).strip().lstrip('0') or '0'
+
+        for issue in all_issues:
+            issue_num = getattr(issue, 'number', None) or (issue.get('number') if isinstance(issue, dict) else None)
+            if issue_num is not None:
+                candidate = str(issue_num).strip().lstrip('0') or '0'
+                if candidate == target:
+                    issue_id = getattr(issue, 'id', None) or (issue.get('id') if isinstance(issue, dict) else None)
+                    if issue_id:
+                        app_logger.info(f"Resolved Metron issue ID {issue_id} for #{issue_number} in series {series_id}")
+                        return int(issue_id)
+
+        app_logger.debug(f"Could not match issue #{issue_number} in series {series_id}")
+        return None
+
+    except Exception as e:
+        app_logger.warning(f"Error resolving Metron issue ID: {e}")
+        return None

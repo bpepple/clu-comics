@@ -5111,7 +5111,10 @@ function showCBZInfo(filePath, fileName) {
                             { key: 'Series', label: 'Series' },
                             { key: 'Number', label: 'Number' },
                             { key: 'Count', label: 'Count' },
-                            { key: 'Volume', label: 'Volume' }
+                            { key: 'Volume', label: 'Volume' },
+                            { key: 'AlternateSeries', label: 'Alternate Series' },
+                            { key: 'AlternateNumber', label: 'Alternate Number' },
+                            { key: 'AlternateCount', label: 'Alternate Count' }
                         ]
                     },
                     {
@@ -5119,8 +5122,13 @@ function showCBZInfo(filePath, fileName) {
                         fields: [
                             { key: 'Year', label: 'Year' },
                             { key: 'Month', label: 'Month' },
+                            { key: 'Day', label: 'Day' },
                             { key: 'Publisher', label: 'Publisher' },
-                            { key: 'PageCount', label: 'Page Count' }
+                            { key: 'Imprint', label: 'Imprint' },
+                            { key: 'Format', label: 'Format' },
+                            { key: 'PageCount', label: 'Page Count' },
+                            { key: 'LanguageISO', label: 'Language' },
+                            { key: 'MetronId', label: 'Metron ID' }
                         ]
                     },
                     {
@@ -5128,9 +5136,39 @@ function showCBZInfo(filePath, fileName) {
                         fields: [
                             { key: 'Writer', label: 'Writer' },
                             { key: 'Penciller', label: 'Penciller' },
+                            { key: 'Inker', label: 'Inker' },
                             { key: 'Colorist', label: 'Colorist' },
-                            { key: 'CoverArtist', label: 'Cover Artist' }
+                            { key: 'Letterer', label: 'Letterer' },
+                            { key: 'CoverArtist', label: 'Cover Artist' },
+                            { key: 'Editor', label: 'Editor' }
                         ]
+                    },
+                    {
+                        title: "Content Details",
+                        fields: [
+                            { key: 'Genre', label: 'Genre' },
+                            { key: 'Characters', label: 'Characters' },
+                            { key: 'Teams', label: 'Teams' },
+                            { key: 'Locations', label: 'Locations' },
+                            { key: 'StoryArc', label: 'Story Arc' },
+                            { key: 'SeriesGroup', label: 'Series Group' },
+                            { key: 'MainCharacterOrTeam', label: 'Main Character/Team' },
+                            { key: 'AgeRating', label: 'Age Rating' }
+                        ]
+                    },
+                    {
+                        title: "Additional Information",
+                        fields: [
+                            { key: 'Summary', label: 'Summary' },
+                            { key: 'Notes', label: 'Notes' },
+                            { key: 'Web', label: 'Web' },
+                            { key: 'ScanInformation', label: 'Scan Information' },
+                            { key: 'Review', label: 'Review' },
+                            { key: 'CommunityRating', label: 'Community Rating' },
+                            { key: 'BlackAndWhite', label: 'Black & White' },
+                            { key: 'Manga', label: 'Manga' }
+                        ],
+                        fullWidth: true
                     }
                 ];
 
@@ -5138,8 +5176,9 @@ function showCBZInfo(filePath, fileName) {
                 fieldGroups.forEach(group => {
                     const hasFields = group.fields.some(field => comicInfo[field.key]);
                     if (hasFields) {
+                        const colClass = group.fullWidth ? 'col-md-12' : 'col-md-12';
                         html += `
-                            <div class="col-md-12 mb-3">
+                            <div class="${colClass} mb-3">
                                 <h6 class="text-muted small">${group.title}</h6>
                                 <ul class="list-unstyled small">
                         `;
@@ -5151,6 +5190,15 @@ function showCBZInfo(filePath, fileName) {
                                 // Format special values
                                 if (field.key === 'PageCount') {
                                     value = parseInt(value);
+                                }
+
+                                if (field.key === 'BlackAndWhite' || field.key === 'Manga') {
+                                    if (value === 'YesAndRightToLeft') value = 'Yes (Right to Left)';
+                                    else if (value !== 'Yes' && value !== 'No') value = 'Unknown';
+                                }
+
+                                if (field.key === 'CommunityRating' && value > 0) {
+                                    value = `${value}/5`;
                                 }
 
                                 html += `<li><strong>${field.label}:</strong> ${value}</li>`;

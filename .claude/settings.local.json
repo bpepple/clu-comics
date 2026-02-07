@@ -37,7 +37,8 @@
       "WebFetch(domain:gethomepage.dev)",
       "Bash(dir:*)",
       "Bash(gh issue view:*)",
-      "WebFetch(domain:mokkari.readthedocs.io)"
+      "WebFetch(domain:mokkari.readthedocs.io)",
+      "Bash(git mv:*)"
     ],
     "deny": [],
     "ask": []

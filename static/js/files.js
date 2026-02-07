@@ -3068,7 +3068,8 @@ function showCBZInfo(filePath, fileName, directoryPath, fileList) {
               { key: 'Imprint', label: 'Imprint' },
               { key: 'Format', label: 'Format' },
               { key: 'PageCount', label: 'Page Count' },
-              { key: 'LanguageISO', label: 'Language' }
+              { key: 'LanguageISO', label: 'Language' },
+              { key: 'MetronId', label: 'Metron ID' }
             ]
           },
           {

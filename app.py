@@ -14,7 +14,7 @@ import logging
 import signal
 import select
 import random
-import comicvine
+from models import comicvine
 from datetime import datetime, timedelta
 import time as time_module
 from PIL import Image, ImageFilter, ImageDraw
@@ -5329,7 +5329,7 @@ def auto_fetch_comicvine_metadata(destination_path):
         The final file path (renamed path if file was renamed, original path otherwise)
     """
     try:
-        from comicvine import auto_fetch_metadata_for_folder
+        from models.comicvine import auto_fetch_metadata_for_folder
 
         # Check 1: Is COMICVINE_API_KEY configured?
         api_key = app.config.get("COMICVINE_API_KEY", "")
@@ -5398,7 +5398,7 @@ def auto_fetch_metron_metadata(destination_path):
             get_issue_metadata, map_to_comicinfo
         )
         from models.providers.base import extract_issue_number
-        from comicvine import generate_comicinfo_xml, add_comicinfo_to_archive
+        from models.comicvine import generate_comicinfo_xml, add_comicinfo_to_archive
         from comicinfo import read_comicinfo_from_zip
         from rename import load_custom_rename_config
 
@@ -7141,6 +7141,7 @@ def api_mark_comic_read():
         return jsonify({"error": "Missing path parameter"}), 400
 
     # Extract metadata from ComicInfo.xml if available
+    comic_info = None
     writer = ''
     penciller = ''
     characters = ''
@@ -7162,10 +7163,29 @@ def api_mark_comic_read():
                         writer=writer, penciller=penciller, characters=characters, publisher=publisher)
         clear_stats_cache_keys(['library_stats', 'reading_history', 'reading_heatmap'])
         app_logger.info(f"Marked comic as read: {comic_path}" + (f" at {read_at}" if read_at else ""))
-        return jsonify({"success": True})
     except Exception as e:
         app_logger.error(f"Error marking comic as read: {e}")
         return jsonify({"error": str(e)}), 500
+
+    # Scrobble to Metron if configured (non-blocking — local read already saved)
+    try:
+        metron_username = app.config.get("METRON_USERNAME", "").strip()
+        metron_password = app.config.get("METRON_PASSWORD", "").strip()
+        if metron_username and metron_password:
+            from models import metron as metron_module
+            if metron_module.is_mokkari_available():
+                api = metron_module.get_api(metron_username, metron_password)
+                if api:
+                    metron_issue_id = metron_module.resolve_metron_issue_id(
+                        api, comic_path, comic_info.get('Number') if comic_info else None
+                    )
+                    if metron_issue_id:
+                        metron_module.scrobble_issue(api, metron_issue_id, read_at)
+                        app_logger.info(f"Scrobbled to Metron: issue {metron_issue_id}")
+    except Exception as e:
+        app_logger.warning(f"Metron scrobble failed (non-blocking): {e}")
+
+    return jsonify({"success": True})
 
 
 @app.route('/api/reading-trends/<field>')
@@ -11507,6 +11527,9 @@ def generate_comicinfo_xml(issue_data, series_data=None):
     # Manga flag: ComicRack expects "Yes" or "No"
     add("Manga", "No")
 
+    # Metron ID (for scrobble support)
+    add("MetronId", issue_data.get("MetronId"))
+
     # Notes - use provided Notes if available (e.g., from ComicVine), otherwise generate GCD notes
     if issue_data.get("Notes"):
         add("Notes", issue_data.get("Notes"))
@@ -12089,7 +12112,7 @@ def search_comicvine_metadata():
         try:
             app_logger.debug("DEBUG: comicvine module imported successfully")
         except ImportError as import_err:
-            app_logger.error(f"Failed to import comicvine module: {str(import_err)}")
+            app_logger.error(f"Failed to import models.comicvine module: {str(import_err)}")
             return jsonify({
                 "success": False,
                 "error": f"ComicVine module import error: {str(import_err)}"
