@@ -1959,10 +1959,21 @@ def generate_filename_pattern(custom_pattern, series_name, issue_number):
         # This allows "Nemesis: Forever", "Nemesis - Forever", "Nemesis Forever" to all match
         normalized_name = re.sub(r'[\s\-_:;,\.]+', ' ', temp_name).strip()
 
-        # Escape series name for regex
-        series_escaped = re.escape(normalized_name)
-        # Allow flexible punctuation/whitespace matching (spaces, underscores, dashes, colons, apostrophes, periods, ampersands, or nothing)
-        series_pattern = the_prefix + series_escaped.replace(r'\ ', r"[\s\-_:'\.&]*")
+        # Build series pattern word-by-word, making common connecting words optional
+        # Files often omit words like "and", "of", "the" (e.g., "Magik Colossus" for "Magik and Colossus")
+        OPTIONAL_WORDS = {'and', 'the', 'of', 'or', 'vs', 'versus'}
+        sep = r"[\s\-_:'\.&]*"
+        words = normalized_name.split()
+        pattern_parts = []
+        for i, word in enumerate(words):
+            escaped_word = re.escape(word)
+            if word.lower() in OPTIONAL_WORDS:
+                pattern_parts.append(f"(?:{escaped_word}{sep})?")
+            else:
+                pattern_parts.append(escaped_word)
+                if i < len(words) - 1:
+                    pattern_parts.append(sep)
+        series_pattern = the_prefix + ''.join(pattern_parts)
 
         # Normalize issue number - handle leading zeros (1, 01, 001 all match)
         issue_num_clean = str(issue_number).strip().lstrip('0') or '0'

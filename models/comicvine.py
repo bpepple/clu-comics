@@ -876,6 +876,9 @@ def generate_comicinfo_xml(issue_data: Dict[str, Any]) -> bytes:
     # Notes
     add("Notes", issue_data.get("Notes"))
 
+    # Metron ID (for scrobble support)
+    add("MetronId", issue_data.get("MetronId"))
+
     # Serialize as UTF-8 bytes
     ET.indent(root)
     tree = ET.ElementTree(root)

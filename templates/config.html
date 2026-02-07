@@ -42,8 +42,9 @@
                     API</button>
             </li>
             <li class="nav-item" role="presentation">
-                <button class="nav-link" id="metadata-providers-tab" data-bs-toggle="tab" data-bs-target="#metadata-providers"
-                    type="button" role="tab" aria-controls="metadata-providers" aria-selected="false">Metadata
+                <button class="nav-link" id="metadata-providers-tab" data-bs-toggle="tab"
+                    data-bs-target="#metadata-providers" type="button" role="tab" aria-controls="metadata-providers"
+                    aria-selected="false">Metadata
                     Providers</button>
             </li>
             <li class="nav-item" role="presentation">
@@ -518,7 +519,8 @@
                 <!-- Provider Credentials -->
                 <div class="container p-4 border rounded shadow-sm mb-4">
                     <h4>Provider Credentials</h4>
-                    <p class="text-muted">Configure API credentials for metadata providers. Credentials are stored encrypted.</p>
+                    <p class="text-muted">Configure API credentials for metadata providers. Credentials are stored
+                        encrypted.</p>
 
                     <div id="providersCredentialsList" class="mb-3">
                         <div class="text-center py-3">
@@ -533,7 +535,8 @@
                 <!-- Library Provider Configuration -->
                 <div class="container p-4 border rounded shadow-sm mb-4">
                     <h4>Library Provider Settings</h4>
-                    <p class="text-muted">Configure which metadata providers to use for each library and their priority order.</p>
+                    <p class="text-muted">Configure which metadata providers to use for each library and their priority
+                        order.</p>
 
                     <div id="libraryProvidersList" class="mb-3">
                         <div class="text-center py-3">
@@ -2399,6 +2402,12 @@
                         </form>`;
                 }
 
+                const metronAttribution = provider.type === 'metron' ? `
+                            <div class="card-footer text-muted small">
+                                Metadata provided by <a href="https://metron.cloud" target="_blank">Metron</a><br>
+                                Help support Metron with a <a href="https://opencollective.com/metron" target="_blank">donation</a>
+                            </div>` : '';
+
                 html += `
                     <div class="col-md-6 mb-3">
                         <div class="card h-100">
@@ -2410,6 +2419,7 @@
                                 ${cardBody}
                                 ${lastTested}
                             </div>
+                            ${metronAttribution}
                             <div class="card-footer text-muted small">
                                 Rate limit: ${provider.rate_limit} requests/minute
                             </div>

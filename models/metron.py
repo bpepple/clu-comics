@@ -856,7 +856,9 @@ def resolve_metron_issue_id(api, comic_path: str, issue_number: str = None) -> O
 
     Strategy:
     1. Check ComicInfo.xml for <MetronId> tag
-    2. If not found, find cvinfo in parent folder to get series_id
+    2. Find cvinfo in parent folder to get series_id
+    2.5. If no series_id, search Metron by series name from ComicInfo.xml
+         and create/update cvinfo for future lookups
     3. Use get_all_issues_for_series() and match by issue number
 
     Args:
@@ -868,6 +870,9 @@ def resolve_metron_issue_id(api, comic_path: str, issue_number: str = None) -> O
         Metron issue ID, or None if not resolved
     """
     import os
+
+    comic_info = None
+    parent_folder = os.path.dirname(comic_path)
 
     # Step 1: Check ComicInfo.xml for MetronId
     try:
@@ -887,7 +892,6 @@ def resolve_metron_issue_id(api, comic_path: str, issue_number: str = None) -> O
     except Exception as e:
         app_logger.warning(f"Could not read ComicInfo.xml for MetronId: {e}")
 
-    # Step 2: Find cvinfo in parent folder to get series_id
     if not issue_number:
         # Try extracting from filename as last resort
         from models.providers.base import extract_issue_number
@@ -898,16 +902,41 @@ def resolve_metron_issue_id(api, comic_path: str, issue_number: str = None) -> O
         return None
 
     try:
+        # Step 2: Find cvinfo in parent folder to get series_id
         from models.comicvine import find_cvinfo_in_folder
-        parent_folder = os.path.dirname(comic_path)
         cvinfo_path = find_cvinfo_in_folder(parent_folder)
-        if not cvinfo_path:
-            app_logger.debug(f"No cvinfo found in {parent_folder}")
-            return None
+        series_id = None
 
-        series_id = parse_cvinfo_for_metron_id(cvinfo_path)
+        if cvinfo_path:
+            series_id = parse_cvinfo_for_metron_id(cvinfo_path)
+
+        # Step 2.5: Search Metron by series name from ComicInfo.xml
+        if not series_id and comic_info:
+            series_name = comic_info.get('Series')
+            volume_year = comic_info.get('Volume')
+            if series_name:
+                try:
+                    year = int(volume_year) if volume_year else None
+                except (ValueError, TypeError):
+                    year = None
+                search_result = search_series_by_name(api, series_name, year)
+                if search_result:
+                    series_id = search_result['id']
+                    # Persist to cvinfo for future lookups
+                    if cvinfo_path:
+                        update_cvinfo_with_metron_id(cvinfo_path, series_id)
+                    else:
+                        create_cvinfo_file(
+                            os.path.join(parent_folder, 'cvinfo'),
+                            search_result.get('cv_id'),
+                            series_id,
+                            search_result.get('publisher_name'),
+                            search_result.get('year_began')
+                        )
+                    app_logger.info(f"Found Metron series {series_id} via name search for '{series_name}'")
+
         if not series_id:
-            app_logger.debug(f"No series_id in cvinfo: {cvinfo_path}")
+            app_logger.debug(f"Could not resolve series_id for {comic_path}")
             return None
 
         # Step 3: Fetch all issues for the series and match by number
