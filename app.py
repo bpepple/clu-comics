@@ -34,6 +34,7 @@ import mysql.connector
 import base64
 from io import BytesIO
 from api import app
+import app_state
 from favorites import favorites_bp
 
 # Custom URL converter for signed integers (supports negative IDs)
@@ -135,9 +136,8 @@ app.register_blueprint(opds_bp)
 from reading_lists import reading_lists_bp
 app.register_blueprint(reading_lists_bp)
 
-# Initialize APScheduler for scheduled file index rebuilds
-rebuild_scheduler = BackgroundScheduler(daemon=True)
-rebuild_scheduler.start()
+# Start schedulers
+app_state.rebuild_scheduler.start()
 app_logger.info("📅 Rebuild scheduler initialized")
 
 # Function to perform scheduled file index rebuild
@@ -200,7 +200,7 @@ def configure_rebuild_schedule():
             return
 
         # Remove existing jobs
-        rebuild_scheduler.remove_all_jobs()
+        app_state.rebuild_scheduler.remove_all_jobs()
 
         if schedule['frequency'] == 'disabled':
             app_logger.info("📅 Scheduled rebuilds are disabled")
@@ -214,7 +214,7 @@ def configure_rebuild_schedule():
         if schedule['frequency'] == 'daily':
             # Daily at specified time
             trigger = CronTrigger(hour=hour, minute=minute)
-            rebuild_scheduler.add_job(
+            app_state.rebuild_scheduler.add_job(
                 scheduled_file_index_rebuild,
                 trigger=trigger,
                 id='file_index_rebuild',
@@ -227,7 +227,7 @@ def configure_rebuild_schedule():
             # Weekly on specified day at specified time
             weekday = int(schedule['weekday'])
             trigger = CronTrigger(day_of_week=weekday, hour=hour, minute=minute)
-            rebuild_scheduler.add_job(
+            app_state.rebuild_scheduler.add_job(
                 scheduled_file_index_rebuild,
                 trigger=trigger,
                 id='file_index_rebuild',
@@ -240,24 +240,14 @@ def configure_rebuild_schedule():
     except Exception as e:
         app_logger.error(f"Failed to configure rebuild schedule: {e}")
 
-# Initialize APScheduler for scheduled series sync
-sync_scheduler = BackgroundScheduler(daemon=True)
-sync_scheduler.start()
+app_state.sync_scheduler.start()
 app_logger.info("📅 Sync scheduler initialized")
 
-# Initialize APScheduler for GetComics auto-download
-getcomics_scheduler = BackgroundScheduler(daemon=True)
-getcomics_scheduler.start()
+app_state.getcomics_scheduler.start()
 app_logger.info("📅 GetComics scheduler initialized")
 
-# Initialize APScheduler for Weekly Packs auto-download
-weekly_packs_scheduler = BackgroundScheduler(daemon=True)
-weekly_packs_scheduler.start()
+app_state.weekly_packs_scheduler.start()
 app_logger.info("📅 Weekly Packs scheduler initialized")
-
-# Global state for wanted issues refresh
-wanted_refresh_in_progress = False
-wanted_refresh_lock = threading.Lock()
 
 # Function to perform scheduled series sync
 def scheduled_series_sync():
@@ -578,7 +568,7 @@ def configure_sync_schedule():
             return
 
         # Remove existing jobs
-        sync_scheduler.remove_all_jobs()
+        app_state.sync_scheduler.remove_all_jobs()
 
         if schedule['frequency'] == 'disabled':
             app_logger.info("📅 Scheduled series sync is disabled")
@@ -592,7 +582,7 @@ def configure_sync_schedule():
         if schedule['frequency'] == 'daily':
             # Daily at specified time
             trigger = CronTrigger(hour=hour, minute=minute)
-            sync_scheduler.add_job(
+            app_state.sync_scheduler.add_job(
                 scheduled_series_sync,
                 trigger=trigger,
                 id='series_sync',
@@ -605,7 +595,7 @@ def configure_sync_schedule():
             # Weekly on specified day at specified time
             weekday = int(schedule['weekday'])
             trigger = CronTrigger(day_of_week=weekday, hour=hour, minute=minute)
-            sync_scheduler.add_job(
+            app_state.sync_scheduler.add_job(
                 scheduled_series_sync,
                 trigger=trigger,
                 id='series_sync',
@@ -768,7 +758,7 @@ def configure_getcomics_schedule():
             return
 
         # Remove existing jobs
-        getcomics_scheduler.remove_all_jobs()
+        app_state.getcomics_scheduler.remove_all_jobs()
 
         if schedule['frequency'] == 'disabled':
             app_logger.info("📅 Scheduled GetComics auto-download is disabled")
@@ -782,7 +772,7 @@ def configure_getcomics_schedule():
         if schedule['frequency'] == 'daily':
             # Daily at specified time
             trigger = CronTrigger(hour=hour, minute=minute)
-            getcomics_scheduler.add_job(
+            app_state.getcomics_scheduler.add_job(
                 scheduled_getcomics_download,
                 trigger=trigger,
                 id='getcomics_download',
@@ -795,7 +785,7 @@ def configure_getcomics_schedule():
             # Weekly on specified day at specified time
             weekday = int(schedule['weekday'])
             trigger = CronTrigger(day_of_week=weekday, hour=hour, minute=minute)
-            getcomics_scheduler.add_job(
+            app_state.getcomics_scheduler.add_job(
                 scheduled_getcomics_download,
                 trigger=trigger,
                 id='getcomics_download',
@@ -1003,7 +993,7 @@ def schedule_weekly_packs_retry():
         from apscheduler.triggers.date import DateTrigger
         trigger = DateTrigger(run_date=run_time)
 
-        weekly_packs_scheduler.add_job(
+        app_state.weekly_packs_scheduler.add_job(
             scheduled_weekly_packs_download,
             trigger=trigger,
             id='weekly_packs_retry',
@@ -1028,7 +1018,7 @@ def configure_weekly_packs_schedule():
             return
 
         # Remove existing jobs
-        weekly_packs_scheduler.remove_all_jobs()
+        app_state.weekly_packs_scheduler.remove_all_jobs()
 
         if not config['enabled']:
             app_logger.info("📅 Scheduled Weekly Packs download is disabled")
@@ -1049,7 +1039,7 @@ def configure_weekly_packs_schedule():
         # Weekly on specified day at specified time
         weekday = int(config['weekday'])
         trigger = CronTrigger(day_of_week=weekday, hour=hour, minute=minute)
-        weekly_packs_scheduler.add_job(
+        app_state.weekly_packs_scheduler.add_job(
             scheduled_weekly_packs_download,
             trigger=trigger,
             id='weekly_packs_download',
@@ -1288,13 +1278,11 @@ def refresh_wanted_cache_background():
     Rebuild wanted issues cache for all mapped series.
     This runs in a background thread and does the heavy file I/O work.
     """
-    global wanted_refresh_in_progress
-
-    with wanted_refresh_lock:
-        if wanted_refresh_in_progress:
+    with app_state.wanted_refresh_lock:
+        if app_state.wanted_refresh_in_progress:
             app_logger.info("Wanted refresh already in progress, skipping")
             return
-        wanted_refresh_in_progress = True
+        app_state.wanted_refresh_in_progress = True
 
     try:
         from database import (get_all_mapped_series, get_issues_for_series,
@@ -1357,8 +1345,8 @@ def refresh_wanted_cache_background():
     except Exception as e:
         app_logger.error(f"Error during wanted issues cache refresh: {e}")
     finally:
-        with wanted_refresh_lock:
-            wanted_refresh_in_progress = False
+        with app_state.wanted_refresh_lock:
+            app_state.wanted_refresh_in_progress = False
 
 
 @app.route('/wanted')
@@ -1374,7 +1362,7 @@ def wanted():
     cache_age = get_wanted_cache_age()
 
     # If cache is empty and not currently refreshing, trigger background refresh
-    if not cached and not wanted_refresh_in_progress:
+    if not cached and not app_state.wanted_refresh_in_progress:
         threading.Thread(target=refresh_wanted_cache_background, daemon=True).start()
         return render_template('wanted.html',
                              upcoming=[],
@@ -1453,7 +1441,7 @@ def wanted():
                          total_upcoming=len(upcoming),
                          total_missing=len(missing),
                          loading=False,
-                         refreshing=wanted_refresh_in_progress,
+                         refreshing=app_state.wanted_refresh_in_progress,
                          cache_age=cache_age)
 
 
@@ -3465,7 +3453,7 @@ def get_directory_listing(path):
 
 def invalidate_cache_for_path(path):
     """Invalidate cache for a specific path and its parent with improved tracking."""
-    global last_cache_invalidation, _data_dir_stats_last_update
+    global last_cache_invalidation
 
     # Skip cache invalidation for WATCH and TARGET directories
     if is_critical_path(path):
@@ -3524,7 +3512,7 @@ def invalidate_cache_for_path(path):
         cache_stats['invalidations'] += invalidated_count
 
     # Also invalidate directory stats cache when files change
-    _data_dir_stats_last_update = 0
+    app_state.data_dir_stats_last_update = 0
 
     # Track when cache invalidation occurred
     last_cache_invalidation = time.time()
@@ -3617,7 +3605,7 @@ def should_rebuild_cache():
 @app.route('/clear-cache', methods=['POST'])
 def clear_cache():
     """Manually clear the directory cache."""
-    global directory_cache, cache_timestamps, last_cache_invalidation, _data_dir_stats_last_update
+    global directory_cache, cache_timestamps, last_cache_invalidation
 
     with cache_lock:
         cleared_count = len(directory_cache)
@@ -3630,7 +3618,7 @@ def clear_cache():
         cache_stats['invalidations'] = 0
 
     last_cache_invalidation = time.time()
-    _data_dir_stats_last_update = 0  # Also invalidate directory stats cache
+    app_state.data_dir_stats_last_update = 0  # Also invalidate directory stats cache
 
     # Also clear stats cache (for insights page charts)
     clear_stats_cache()
@@ -3685,8 +3673,8 @@ def get_cache_status():
     except Exception as e:
         app_logger.warning(f"Error getting data directory stats, using cached or default values: {e}")
         # Use cached stats if available, otherwise use defaults
-        if _data_dir_stats_cache:
-            data_dir_stats = _data_dir_stats_cache
+        if app_state.data_dir_stats_cache:
+            data_dir_stats = app_state.data_dir_stats_cache
         else:
             data_dir_stats = {
                 "subdir_count": 0,
@@ -3938,7 +3926,7 @@ def api_get_rebuild_schedule():
         next_run = "Not scheduled"
         if schedule['frequency'] != 'disabled':
             try:
-                jobs = rebuild_scheduler.get_jobs()
+                jobs = app_state.rebuild_scheduler.get_jobs()
                 if jobs:
                     next_run_time = jobs[0].next_run_time
                     if next_run_time:
@@ -4010,7 +3998,7 @@ def api_get_sync_schedule():
         next_run = "Not scheduled"
         if schedule['frequency'] != 'disabled':
             try:
-                jobs = sync_scheduler.get_jobs()
+                jobs = app_state.sync_scheduler.get_jobs()
                 if jobs:
                     next_run_time = jobs[0].next_run_time
                     if next_run_time:
@@ -4100,7 +4088,7 @@ def api_get_getcomics_schedule():
         next_run = "Not scheduled"
         if schedule['frequency'] != 'disabled':
             try:
-                jobs = getcomics_scheduler.get_jobs()
+                jobs = app_state.getcomics_scheduler.get_jobs()
                 if jobs:
                     next_run_time = jobs[0].next_run_time
                     if next_run_time:
@@ -4212,7 +4200,7 @@ def api_get_weekly_packs_config():
         next_run = "Not scheduled"
         if config['enabled']:
             try:
-                jobs = weekly_packs_scheduler.get_jobs()
+                jobs = app_state.weekly_packs_scheduler.get_jobs()
                 if jobs:
                     next_run_time = jobs[0].next_run_time
                     if next_run_time:
@@ -4374,7 +4362,7 @@ def api_check_weekly_pack_status():
 def api_refresh_wanted():
     """Trigger wanted issues cache refresh in background."""
     try:
-        if wanted_refresh_in_progress:
+        if app_state.wanted_refresh_in_progress:
             return jsonify({
                 "success": True,
                 "message": "Refresh already in progress"
@@ -4402,7 +4390,7 @@ def api_wanted_status():
         count = len(cached) if cached else 0
 
         return jsonify({
-            "refreshing": wanted_refresh_in_progress,
+            "refreshing": app_state.wanted_refresh_in_progress,
             "cache_age": cache_age,
             "count": count
         })
@@ -4411,20 +4399,13 @@ def api_wanted_status():
         return jsonify({"error": str(e)}), 500
 
 
-# Cache for directory statistics to avoid repeated filesystem walks
-_data_dir_stats_cache = {}
-_data_dir_stats_last_update = 0
-DATA_DIR_STATS_CACHE_DURATION = 300  # Cache for 5 minutes
-
 def get_data_directory_stats():
     """Get statistics about the DATA_DIR including subdirectory count and file count."""
-    global _data_dir_stats_cache, _data_dir_stats_last_update
-    
     current_time = time.time()
-    
+
     # Return cached stats if they're still valid
-    if (current_time - _data_dir_stats_last_update) < DATA_DIR_STATS_CACHE_DURATION:
-        return _data_dir_stats_cache
+    if (current_time - app_state.data_dir_stats_last_update) < app_state.DATA_DIR_STATS_CACHE_DURATION:
+        return app_state.data_dir_stats_cache
     
     try:
         app_logger.debug("Calculating fresh data directory statistics...")
@@ -4466,7 +4447,7 @@ def get_data_directory_stats():
         scan_time = time.time() - start_time
         
         # Cache the results
-        _data_dir_stats_cache = {
+        app_state.data_dir_stats_cache = {
             "subdir_count": subdir_count,
             "total_files": total_files,
             "total_dirs": subdir_count + 1,  # +1 for the root DATA_DIR
@@ -4474,16 +4455,16 @@ def get_data_directory_stats():
             "max_depth_reached": max_depth,  # Show what depth limit was used
             "scan_time": round(scan_time, 2)  # Show how long the scan took
         }
-        _data_dir_stats_last_update = current_time
+        app_state.data_dir_stats_last_update = current_time
         
-        app_logger.debug(f"Data directory stats updated: {subdir_count} subdirs, {total_files} files (scan limited: {_data_dir_stats_cache['scan_limited']}, time: {scan_time:.2f}s)")
-        return _data_dir_stats_cache
+        app_logger.debug(f"Data directory stats updated: {subdir_count} subdirs, {total_files} files (scan limited: {app_state.data_dir_stats_cache['scan_limited']}, time: {scan_time:.2f}s)")
+        return app_state.data_dir_stats_cache
         
     except Exception as e:
         app_logger.error(f"Error getting data directory stats: {e}")
         # Return cached stats if available, otherwise return defaults
-        if _data_dir_stats_cache:
-            return _data_dir_stats_cache
+        if app_state.data_dir_stats_cache:
+            return app_state.data_dir_stats_cache
         return {
             "subdir_count": 0,
             "total_files": 0,
