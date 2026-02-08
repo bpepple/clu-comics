@@ -417,20 +417,7 @@ def process_incoming_wanted_issues():
             continue
 
         # Convert issues to objects for matching function
-        class IssueObj:
-            def __init__(self, data):
-                self.number = data.get('number')
-                self.id = data.get('id')
-                self.name = data.get('name')
-                self.store_date = data.get('store_date')
-                self.cover_date = data.get('cover_date')
-
-        class SeriesObj:
-            def __init__(self, data):
-                self.name = data.get('name')
-                self.volume = data.get('volume')
-                self.id = data.get('id')
-
+        from models.issue import IssueObj, SeriesObj
         issue_objs = [IssueObj(i) for i in issues]
         series_obj = SeriesObj(series)
 
@@ -666,24 +653,8 @@ def scheduled_getcomics_download():
                 continue
 
             # Convert issues to objects for matching function
-            class IssueObj:
-                def __init__(self, data):
-                    self.number = data.get('number')
-                    self.id = data.get('id')
-                    self.name = data.get('name')
-                    self.store_date = data.get('store_date')
-                    self.cover_date = data.get('cover_date')
-                    self.image = data.get('image')
-
+            from models.issue import IssueObj, SeriesObj
             issue_objs = [IssueObj(i) for i in issues]
-
-            # Create a minimal series_info object for matching
-            class SeriesObj:
-                def __init__(self, data):
-                    self.name = data.get('name')
-                    self.volume = data.get('volume')
-                    self.id = data.get('id')
-
             series_obj = SeriesObj(series)
 
             # Check which issues are in collection
@@ -1355,24 +1326,8 @@ def refresh_wanted_cache_background():
                 continue
 
             # Convert issues to objects for matching function
-            class IssueObj:
-                def __init__(self, data):
-                    self.number = data.get('number')
-                    self.id = data.get('id')
-                    self.name = data.get('name')
-                    self.store_date = data.get('store_date')
-                    self.cover_date = data.get('cover_date')
-                    self.image = data.get('image')
-
+            from models.issue import IssueObj, SeriesObj
             issue_objs = [IssueObj(i) for i in issues]
-
-            # Create a minimal series_info object for matching
-            class SeriesObj:
-                def __init__(self, data):
-                    self.name = data.get('name')
-                    self.volume = data.get('volume')
-                    self.id = data.get('id')
-
             series_obj = SeriesObj(series)
 
             # Check which issues are in collection
