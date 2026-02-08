@@ -146,13 +146,17 @@ def score_getcomics_result(result_title: str, series_name: str, issue_number: st
     """
     Score a GetComics result against wanted issue criteria.
 
-    Scoring:
-    - Series name found (fuzzy - all words present): +40
-    - Issue number matches: +40
-    - Year matches: +20
+    Scoring (max 95):
+    - Series name found (all words present):      +30
+    - Title tightness (few extra words):           +15
+    - Issue number (#N or "Issue N"):              +30
+    - Issue number (standalone bare number):       +20  (lower confidence)
+    - Year matches:                                +20
 
     Penalties:
-    - Issue range detected (e.g., "#1-18" or "#1 – 18"): -100 (disqualify)
+    - Issue range detected (collected edition):   -100  (disqualify)
+    - Collected edition keywords:                  -30
+    - Many extra words in title (4+):              -20
 
     Args:
         result_title: Title from GetComics search result
@@ -161,7 +165,7 @@ def score_getcomics_result(result_title: str, series_name: str, issue_number: st
         year: Expected year (series year_began or store_date year)
 
     Returns:
-        Score from 0-100 (negative scores indicate disqualification)
+        Score (negative scores indicate disqualification)
     """
     import re
 
@@ -172,63 +176,110 @@ def score_getcomics_result(result_title: str, series_name: str, issue_number: st
     # Normalize issue number (remove leading zeros for comparison)
     issue_num = str(issue_number).lstrip('0') or '0'
 
-    # Check for issue range patterns FIRST - these indicate collected editions, not single issues
-    # Patterns like: "#1 – 18", "#1-18", "#1 - 18", "Issues 1-18", "#001-018"
-    # The dash can be hyphen (-), en-dash (–), or em-dash (—)
+    # ── DISQUALIFICATION: Issue ranges ──
+    # Patterns like: "#1 – 18", "#1-18", "Issues 1-18", "#001-018"
     issue_range_patterns = [
-        rf'#\d+\s*[-–—]\s*\d+',                    # #1-18, #1 – 18, #001-018
-        rf'issues?\s*\d+\s*[-–—]\s*\d+',           # Issue 1-18, Issues 1 - 18
-        rf'\(\d{4}\s*[-–—]\s*\d{4}\)',             # (2002-2003) year range in parens
+        rf'#\d+\s*[-–—]\s*\d+',
+        rf'issues?\s*\d+\s*[-–—]\s*\d+',
+        rf'\(\d{{4}}\s*[-–—]\s*\d{{4}}\)',
     ]
 
     for range_pattern in issue_range_patterns:
         range_match = re.search(range_pattern, title_lower, re.IGNORECASE)
         if range_match:
-            # Check if our issue number appears at the END of a range (e.g., "#1-18" when looking for #18)
-            # This means it's a collected edition, not the specific issue
-            end_of_range_pattern = rf'[-–—]\s*0*{re.escape(issue_num)}\b'
-            if re.search(end_of_range_pattern, result_title, re.IGNORECASE):
-                logger.debug(f"Issue range detected ending with #{issue_num}: '{range_match.group()}' - disqualifying")
-                return -100  # Disqualify this result
+            end_pattern = rf'[-–—]\s*0*{re.escape(issue_num)}\b'
+            if re.search(end_pattern, result_title, re.IGNORECASE):
+                logger.debug(f"Disqualified (issue range ending with #{issue_num}): '{range_match.group()}'")
+                return -100
 
-    # Series name check (fuzzy - all words present)
+    # ── SERIES NAME MATCH (+30) ──
     series_words = series_lower.split()
     if all(word in title_lower for word in series_words):
-        score += 40
-        logger.debug(f"Series name match: +40")
+        score += 30
+        logger.debug(f"Series name match: +30")
 
-    # Issue number check (exact)
-    # Look for patterns: #15, #015, Issue 15, etc.
+    # ── TITLE TIGHTNESS (+15 bonus or -20 penalty) ──
+    # Count how many "extra" words appear beyond the series name, issue, and year.
+    # Titles with many extra words are likely different products.
+    noise_words = {'the', 'a', 'an', 'of', 'and', 'in', 'by', 'for',
+                   'to', 'from', 'with', 'on', 'at', 'or', 'is'}
+    # Build expected word set using regex extraction (handles hyphens like Spider-Man)
+    expected_words = set(re.findall(r'[a-z0-9]+', series_lower))
+    expected_words.add(issue_num)
+    if year:
+        expected_words.add(str(year))
+    # Common format noise that doesn't indicate a different product
+    expected_words.update(['vol', 'volume', 'issue', 'comic', 'comics'])
+
+    title_word_list = re.findall(r'[a-z0-9]+', title_lower)
+    title_word_list = [w for w in title_word_list if w not in noise_words and len(w) > 1]
+    expected_count = sum(1 for w in title_word_list if w in expected_words)
+    extra_count = len(title_word_list) - expected_count
+
+    if extra_count <= 1:
+        score += 15
+        logger.debug(f"Title tightness bonus ({extra_count} extra words): +15")
+    elif extra_count >= 4:
+        score -= 20
+        logger.debug(f"Title tightness penalty ({extra_count} extra words): -20")
+
+    # ── ISSUE NUMBER MATCH ──
     issue_patterns = [
-        rf'#0*{re.escape(issue_num)}\b',           # #15, #015
-        rf'issue\s*0*{re.escape(issue_num)}\b',    # Issue 15, Issue15
+        rf'#0*{re.escape(issue_num)}\b',
+        rf'issue\s*0*{re.escape(issue_num)}\b',
     ]
 
     issue_matched = False
     for pattern in issue_patterns:
         if re.search(pattern, title_lower, re.IGNORECASE):
-            score += 40
-            logger.debug(f"Issue number match ({pattern}): +40")
+            score += 30
+            logger.debug(f"Issue number match ({pattern}): +30")
             issue_matched = True
             break
 
-    # Only use standalone number match if no better match found and it's not part of a range
+    # Standalone number fallback (lower confidence, excludes Vol./Volume prefix)
     if not issue_matched:
-        # Check standalone number but exclude if it's part of a range
         standalone_pattern = rf'\b0*{re.escape(issue_num)}\b'
-        standalone_match = re.search(standalone_pattern, title_lower, re.IGNORECASE)
+        standalone_match = re.search(standalone_pattern, title_lower)
         if standalone_match:
-            # Verify this isn't the end of a range by checking what comes before
             match_start = standalone_match.start()
-            prefix = result_title[max(0, match_start-3):match_start]
-            if not re.search(r'[-–—]\s*$', prefix):
-                score += 40
-                logger.debug(f"Issue number match (standalone): +40")
+            prefix = result_title[max(0, match_start - 10):match_start].lower()
+            if re.search(r'[-–—]\s*$', prefix):
+                logger.debug(f"Standalone number rejected (range dash)")
+            elif re.search(r'\bvol(?:ume)?\.?\s*$', prefix):
+                logger.debug(f"Standalone number rejected (volume prefix)")
+            else:
+                score += 20
+                logger.debug(f"Issue number match (standalone): +20")
+                issue_matched = True
 
-    # Year check
+    # ── YEAR MATCH (+20) ──
     if year and str(year) in result_title:
         score += 20
         logger.debug(f"Year match ({year}): +20")
+
+    # ── COLLECTED EDITION PENALTY (-30) ──
+    # Check for collection keywords outside the series name
+    title_remainder = title_lower
+    for word in series_words:
+        title_remainder = title_remainder.replace(word, '', 1)
+
+    collected_keywords = [
+        r'\bomnibus\b',
+        r'\btpb\b',
+        r'\bhardcover\b',
+        r'\bdeluxe\s+edition\b',
+        r'\bcompendium\b',
+        r'\bcomplete\s+collection\b',
+        r'\blibrary\s+edition\b',
+        r'\bbook\s+\d+\b',
+    ]
+
+    for kw_pattern in collected_keywords:
+        if re.search(kw_pattern, title_remainder):
+            score -= 30
+            logger.debug(f"Collected edition penalty ({kw_pattern}): -30")
+            break
 
     logger.debug(f"Score for '{result_title}' vs '{series_name} #{issue_number} ({year})': {score}")
     return score

@@ -705,7 +705,11 @@ def scheduled_getcomics_download():
 
                 # Search GetComics for this issue
                 search_count += 1
-                query = f"{series_name} {issue_num}"
+
+                # Get year from store_date or series (used in query and scoring)
+                issue_year = int(store_date[:4]) if store_date else series_year
+
+                query = f"{series_name} {issue_num} {issue_year}" if issue_year else f"{series_name} {issue_num}"
                 app_logger.info(f"🔍 Searching GetComics for: {query}")
 
                 # Rate limit - avoid hammering GetComics
@@ -720,9 +724,6 @@ def scheduled_getcomics_download():
                 best_result = None
                 best_score = 0
 
-                # Get year from store_date or series
-                issue_year = int(store_date[:4]) if store_date else series_year
-
                 for result in results:
                     score = score_getcomics_result(
                         result['title'],
@@ -734,8 +735,8 @@ def scheduled_getcomics_download():
                         best_score = score
                         best_result = result
 
-                # Only queue download if score >= 60 (series + issue match minimum)
-                if best_score >= 60 and best_result:
+                # Only queue download if score >= 65 (series + issue match minimum)
+                if best_score >= 65 and best_result:
                     app_logger.info(f"✅ Found match (score={best_score}): {best_result['title']}")
 
                     # Get download links
