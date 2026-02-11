@@ -369,6 +369,16 @@ def init_db():
             )
         ''')
 
+        # Create user_preferences table (key-value store for user settings)
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS user_preferences (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                category TEXT DEFAULT 'general',
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
         # Create reading_positions table (save reading position for comics)
         c.execute('''
             CREATE TABLE IF NOT EXISTS reading_positions (
@@ -3722,6 +3732,78 @@ def clear_stats_cache_keys(keys):
 
     except Exception as e:
         app_logger.error(f"Failed to clear stats cache keys {keys}: {e}")
+        return False
+
+
+# =============================================================================
+# User Preferences (key-value store for user settings)
+# =============================================================================
+
+def get_user_preference(key, default=None):
+    """
+    Get a user preference by key.
+
+    Args:
+        key: Preference key (e.g., 'dashboard_order', 'dashboard_hidden')
+        default: Default value if key not found
+
+    Returns:
+        Stored value (parsed from JSON) or default if not found
+    """
+    try:
+        import json
+
+        conn = get_db_connection()
+        if not conn:
+            return default
+
+        c = conn.cursor()
+        c.execute('SELECT value FROM user_preferences WHERE key = ?', (key,))
+        row = c.fetchone()
+        conn.close()
+
+        if row:
+            return json.loads(row['value'])
+        return default
+
+    except Exception as e:
+        app_logger.error(f"Failed to get user preference '{key}': {e}")
+        return default
+
+
+def set_user_preference(key, value, category='general'):
+    """
+    Save a user preference.
+
+    Args:
+        key: Preference key
+        value: Value to store (will be JSON-encoded)
+        category: Category for grouping preferences (e.g., 'dashboard', 'ui')
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        import json
+
+        conn = get_db_connection()
+        if not conn:
+            return False
+
+        c = conn.cursor()
+        c.execute('''
+            INSERT OR REPLACE INTO user_preferences (key, value, category, updated_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        ''', (key, json.dumps(value), category))
+
+        conn.commit()
+        conn.close()
+
+        app_logger.debug(f"Saved user preference: {key}")
+        return True
+
+    except Exception as e:
+        app_logger.error(f"Failed to save user preference '{key}': {e}")
         return False
 
 

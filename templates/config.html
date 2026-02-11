@@ -57,6 +57,11 @@
                     role="tab" aria-controls="styling" aria-selected="false">Styling</button>
             </li>
             <li class="nav-item" role="presentation">
+                <button class="nav-link" id="dashboard-tab" data-bs-toggle="tab" data-bs-target="#dashboard"
+                    type="button" role="tab" aria-controls="dashboard"
+                    aria-selected="false">Dashboard</button>
+            </li>
+            <li class="nav-item" role="presentation">
                 <button class="nav-link" id="recommendations-tab" data-bs-toggle="tab" data-bs-target="#recommendations"
                     type="button" role="tab" aria-controls="recommendations"
                     aria-selected="false">Recommendations</button>
@@ -1114,6 +1119,55 @@
             </div>
 
             <!-- ========================================== -->
+            <!-- TAB: Dashboard Layout -->
+            <!-- ========================================== -->
+            <div class="tab-pane fade" id="dashboard" role="tabpanel" aria-labelledby="dashboard-tab">
+                <div class="container p-4 border rounded shadow-sm mb-4">
+                    <h4><i class="bi bi-layout-text-window-reverse me-2"></i>Dashboard Layout</h4>
+                    <p class="text-muted">Configure which sections appear on your collection dashboard and their display order.</p>
+
+                    {% set sections_meta = {
+                        'favorites': {'name': 'Favorite Collections', 'icon': 'bi-bookmark-heart-fill text-danger'},
+                        'want_to_read': {'name': 'Want to Read', 'icon': 'bi-bookmark-star-fill text-warning'},
+                        'continue_reading': {'name': 'Continue Reading', 'icon': 'bi-book-half text-info'},
+                        'discover': {'name': 'Discover / Recommendations', 'icon': 'bi-stars text-warning'},
+                        'recently_added': {'name': 'Recently Added', 'icon': 'bi-clock-history text-primary'},
+                        'library': {'name': 'Library', 'icon': 'bi-collection-fill text-primary'}
+                    } %}
+                    <ul class="list-group" id="dashboardSectionsList" style="max-width: 500px;">
+                        {% for section_id in dashboard_order %}
+                            {% if section_id in sections_meta %}
+                            {% set meta = sections_meta[section_id] %}
+                            <li class="list-group-item d-flex justify-content-between align-items-center"
+                                data-section-id="{{ section_id }}">
+                                <div class="d-flex align-items-center">
+                                    <input type="checkbox" class="form-check-input dashboard-visible-check me-3"
+                                           {{ '' if section_id in dashboard_hidden else 'checked' }}>
+                                    <i class="bi {{ meta.icon }} me-2"></i>
+                                    <strong>{{ meta.name }}</strong>
+                                    {% if section_id == 'discover' %}
+                                    <small class="text-muted ms-2">(Also requires Recommendations enabled)</small>
+                                    {% endif %}
+                                </div>
+                            </li>
+                            {% endif %}
+                        {% endfor %}
+                    </ul>
+
+                    <div class="alert alert-info mt-2 mb-0">
+                        <i class="bi bi-info-circle me-1"></i>
+                        Changes take effect on the collection/home page after saving.
+                    </div>
+                </div>
+
+                <div class="mb-3 text-center">
+                    <button type="button" class="btn btn-primary" id="saveDashboardBtn" onclick="saveDashboardSettings()">
+                        <i class="bi bi-floppy"></i> Save Dashboard Settings
+                    </button>
+                </div>
+            </div>
+
+            <!-- ========================================== -->
             <!-- TAB 5: Recommendations -->
             <!-- ========================================== -->
             <div class="tab-pane fade" id="recommendations" role="tabpanel" aria-labelledby="recommendations-tab">
@@ -1531,6 +1585,121 @@
 
             if (result.success) {
                 showToast('Recommendation settings saved', 'success');
+            } else {
+                showToast('Error: ' + (result.error || 'Failed to save'), 'error');
+            }
+        } catch (e) {
+            showToast('Error saving settings: ' + e.message, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+        }
+    }
+
+    // Dashboard section list with up/down arrows
+    function renderDashboardList() {
+        const list = document.getElementById('dashboardSectionsList');
+        const items = Array.from(list.children);
+        list.innerHTML = '';
+        items.forEach((item, idx) => {
+            // Remove old arrow buttons
+            const oldBtnGroup = item.querySelector('.dashboard-btn-group');
+            if (oldBtnGroup) oldBtnGroup.remove();
+
+            // Update badge number
+            let badge = item.querySelector('.dashboard-order-badge');
+            if (!badge) {
+                badge = document.createElement('span');
+                badge.className = 'badge bg-secondary me-2 dashboard-order-badge';
+                item.querySelector('div').insertBefore(badge, item.querySelector('.form-check-input'));
+            }
+            badge.textContent = idx + 1;
+
+            const btnGroup = document.createElement('div');
+            btnGroup.className = 'dashboard-btn-group';
+            if (idx > 0) {
+                const upBtn = document.createElement('button');
+                upBtn.type = 'button';
+                upBtn.className = 'btn btn-sm btn-outline-secondary me-1';
+                upBtn.innerHTML = '<i class="bi bi-arrow-up"></i>';
+                upBtn.onclick = () => moveDashboardSection(idx, idx - 1);
+                btnGroup.appendChild(upBtn);
+            }
+            if (idx < items.length - 1) {
+                const downBtn = document.createElement('button');
+                downBtn.type = 'button';
+                downBtn.className = 'btn btn-sm btn-outline-secondary';
+                downBtn.innerHTML = '<i class="bi bi-arrow-down"></i>';
+                downBtn.onclick = () => moveDashboardSection(idx, idx + 1);
+                btnGroup.appendChild(downBtn);
+            }
+            item.appendChild(btnGroup);
+
+            // Drag events
+            item.draggable = true;
+            item.addEventListener('dragstart', (e) => {
+                e.dataTransfer.setData('text/plain', idx);
+                item.classList.add('opacity-50');
+            });
+            item.addEventListener('dragend', () => item.classList.remove('opacity-50'));
+            item.addEventListener('dragover', (e) => { e.preventDefault(); item.classList.add('border-primary'); });
+            item.addEventListener('dragleave', () => item.classList.remove('border-primary'));
+            item.addEventListener('drop', (e) => {
+                e.preventDefault();
+                item.classList.remove('border-primary');
+                const fromIdx = parseInt(e.dataTransfer.getData('text/plain'));
+                moveDashboardSection(fromIdx, idx);
+            });
+
+            list.appendChild(item);
+        });
+    }
+
+    function moveDashboardSection(fromIdx, toIdx) {
+        const list = document.getElementById('dashboardSectionsList');
+        const items = Array.from(list.children);
+        const [moved] = items.splice(fromIdx, 1);
+        items.splice(toIdx, 0, moved);
+        list.innerHTML = '';
+        items.forEach(item => list.appendChild(item));
+        renderDashboardList();
+    }
+
+    // Initialize the dashboard list on load
+    renderDashboardList();
+
+    async function saveDashboardSettings() {
+        const btn = document.getElementById('saveDashboardBtn');
+        const originalHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving...';
+
+        const items = Array.from(document.querySelectorAll('#dashboardSectionsList li'));
+        const order = [];
+        const hidden = [];
+        items.forEach(item => {
+            const id = item.dataset.sectionId;
+            order.push(id);
+            if (!item.querySelector('.dashboard-visible-check').checked) {
+                hidden.push(id);
+            }
+        });
+
+        const data = {
+            dashboardOrder: order,
+            dashboardHidden: hidden
+        };
+
+        try {
+            const response = await fetch('/api/config/dashboard', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            const result = await response.json();
+
+            if (result.success) {
+                showToast('Dashboard settings saved', 'success');
             } else {
                 showToast('Error: ' + (result.error || 'Failed to save'), 'error');
             }

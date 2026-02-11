@@ -26,10 +26,89 @@ from helpers.library import get_library_roots, get_default_library, is_valid_lib
 from database import (
     get_directory_children, get_path_counts_batch, get_recent_files,
     invalidate_browse_cache, add_file_index_entry, delete_file_index_entry,
-    search_file_index
+    search_file_index, get_user_preference
 )
 
 collection_bp = Blueprint('collection', __name__)
+
+# Dashboard section definitions
+DASHBOARD_SECTION_DEFS = {
+    'favorites': {
+        'id': 'favorites',
+        'title': 'Favorite Collections',
+        'icon': 'bi-bookmark-heart-fill text-danger',
+        'swiper_id': 'favoritesSwiper',
+        'view_all_type': 'button',
+        'view_all_text': 'View All',
+    },
+    'want_to_read': {
+        'id': 'want_to_read',
+        'title': 'Want to Read',
+        'icon': 'bi-bookmark-star-fill text-warning',
+        'swiper_id': 'wantToReadSwiper',
+        'view_all_type': 'link',
+        'view_all_href': '/to-read',
+        'view_all_text': 'View All',
+    },
+    'continue_reading': {
+        'id': 'continue_reading',
+        'title': 'Continue Reading',
+        'icon': 'bi-book-half text-info',
+        'swiper_id': 'continueReadingSwiper',
+        'section_html_id': 'continueReadingSection',
+        'view_all_type': 'button',
+        'view_all_onclick': 'loadContinueReading()',
+        'view_all_text': 'View All',
+    },
+    'discover': {
+        'id': 'discover',
+        'title': 'Discover',
+        'icon': 'bi-stars text-warning',
+    },
+    'recently_added': {
+        'id': 'recently_added',
+        'title': 'Recently Added',
+        'icon': 'bi-clock-history text-primary',
+        'swiper_id': 'recentAddedSwiper',
+        'view_all_type': 'button',
+        'view_all_onclick': 'loadRecentlyAdded()',
+        'view_all_text': 'View All',
+    },
+    'library': {
+        'id': 'library',
+        'title': 'Library',
+        'icon': 'bi-collection-fill text-primary',
+    },
+}
+
+DEFAULT_DASHBOARD_ORDER = ['favorites', 'want_to_read', 'continue_reading', 'discover', 'recently_added', 'library']
+
+
+def get_dashboard_order():
+    """Return the stored dashboard order with any missing sections appended."""
+    order = get_user_preference('dashboard_order', default=DEFAULT_DASHBOARD_ORDER)
+    # Backfill any sections added after the user last saved
+    for section_id in DEFAULT_DASHBOARD_ORDER:
+        if section_id not in order:
+            order.append(section_id)
+    return order
+
+
+def get_dashboard_sections():
+    """Build ordered list of visible dashboard sections from user preferences."""
+    order = get_dashboard_order()
+    hidden = set(get_user_preference('dashboard_hidden', default=[]))
+    rec_enabled = config.get("SETTINGS", "REC_ENABLED", fallback="True") == "True"
+
+    sections = []
+    for section_id in order:
+        if section_id in hidden:
+            continue
+        if section_id == 'discover' and not rec_enabled:
+            continue
+        if section_id in DASHBOARD_SECTION_DEFS:
+            sections.append(DASHBOARD_SECTION_DEFS[section_id])
+    return sections
 
 
 # =============================================================================
@@ -50,7 +129,8 @@ def collection(subpath=''):
     initial_path = f'/data/{subpath}' if subpath else ''
     return render_template('collection.html',
                            initial_path=initial_path,
-                           rec_enabled=config.get("SETTINGS", "REC_ENABLED", fallback="True") == "True")
+                           rec_enabled=config.get("SETTINGS", "REC_ENABLED", fallback="True") == "True",
+                           dashboard_sections=get_dashboard_sections())
 
 
 @collection_bp.route('/to-read')
@@ -143,7 +223,7 @@ def api_browse():
             }
 
             if d.get('has_thumbnail'):
-                for ext in ['.png', '.jpg', '.jpeg']:
+                for ext in ['.png', '.jpg', '.jpeg', '.webp']:
                     thumb_path = os.path.join(d['path'], f'folder{ext}')
                     if os.path.exists(thumb_path):
                         dir_info['thumbnail_url'] = url_for('.serve_folder_thumbnail', path=thumb_path)
@@ -235,7 +315,7 @@ def api_scan_directory():
         app_logger.info(f"Starting recursive scan of: {path}")
         scan_start = time.time()
 
-        excluded_extensions = {".png", ".jpg", ".jpeg", ".gif", ".html", ".css", ".ds_store", ".json", ".db", ".xml"}
+        excluded_extensions = {".png", ".jpg", ".jpeg", ".gif", ".html", ".css", ".ds_store", ".json", ".db", ".xml", ".webp"}
         allowed_files = {"missing.txt", "cvinfo"}
 
         delete_file_index_entry(path)

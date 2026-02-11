@@ -75,150 +75,82 @@
     </div>
 
     <!-- Dashboard Sections -->
-    <div id="dashboard-sections" class="mb-5" style="display: none;">
-        <!-- Favorite Collections -->
-        <section class="mb-4 dashboard-section">
-            <div class="d-flex justify-content-between align-items-center mb-3 px-2">
-                <h4 class="m-0"><i class="bi bi-bookmark-heart-fill text-danger me-2"></i>Favorite Collections</h4>
-                <button class="btn btn-sm btn-link text-decoration-none">View All</button>
-            </div>
-            <div class="swiper dashboard-swiper" id="favoritesSwiper">
-                <div class="swiper-wrapper">
-                    <!-- Loaded dynamically by loadFavoritePublishers() -->
-                    <div class="swiper-slide">
-                        <div class="dashboard-card text-center p-4">
-                            <div class="spinner-border text-primary" role="status">
-                                <span class="visually-hidden">Loading...</span>
+    <div id="dashboard-sections" class="mb-5">
+        {% for section in dashboard_sections %}
+            {% if section.id == 'library' %}
+            <!-- Library Section -->
+            <section class="mb-4 dashboard-section" id="library-section" style="display: none;">
+                <div class="d-flex justify-content-between align-items-center mb-3 px-2">
+                    <h4 class="m-0" id="library-header-title"><i class="bi {{ section.icon }} me-2"></i>{{ section.title }}</h4>
+                </div>
+                <div id="file-grid" class="file-grid">
+                </div>
+                <div id="empty-state" class="text-center py-5" style="display: none;">
+                    <i class="bi bi-folder2-open display-1 text-muted"></i>
+                    <p class="lead text-muted mt-3">This folder is empty</p>
+                </div>
+                <nav id="pagination-controls" aria-label="File browser pagination" class="mt-4" style="display: none;">
+                    <ul class="pagination justify-content-center" id="pagination-list">
+                    </ul>
+                </nav>
+            </section>
+            {% elif section.id == 'discover' %}
+            <!-- Discover / Recommendations -->
+            <section class="mb-4 dashboard-section" id="discoverSection">
+                <div class="d-flex justify-content-between align-items-center mb-3 px-2">
+                    <h4 class="m-0"><i class="bi {{ section.icon }} me-2"></i>{{ section.title }}</h4>
+                    <button class="btn btn-sm btn-outline-primary" onclick="refreshRecommendations()">
+                        <i class="bi bi-arrow-clockwise"></i> Refresh
+                    </button>
+                </div>
+                <div class="position-relative">
+                    <div id="recommendationsLoading" class="text-center p-5" style="display: none;">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2 text-muted">Consulting the Oracle...</p>
+                    </div>
+                    <div id="recommendationsPlaceholder" class="text-center p-5 text-muted">
+                        <i class="bi bi-lightbulb fs-1 mb-3"></i>
+                        <p>Click Refresh to get AI-powered recommendations based on your reading history.</p>
+                    </div>
+                    <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 row-cols-xl-5 g-3" id="recommendationsGrid">
+                    </div>
+                </div>
+            </section>
+            {% else %}
+            <!-- {{ section.title }} -->
+            <section class="mb-4 dashboard-section"{% if section.get('section_html_id') %} id="{{ section.section_html_id }}"{% endif %}>
+                <div class="d-flex justify-content-between align-items-center mb-3 px-2">
+                    <h4 class="m-0"><i class="bi {{ section.icon }} me-2"></i>{{ section.title }}</h4>
+                    {% if section.get('view_all_type') == 'link' %}
+                    <a href="{{ section.view_all_href }}" class="btn btn-sm btn-link text-decoration-none">{{ section.view_all_text }}</a>
+                    {% else %}
+                    <button class="btn btn-sm btn-link text-decoration-none"{% if section.get('view_all_onclick') %} onclick="{{ section.view_all_onclick }}"{% endif %}>{{ section.view_all_text }}</button>
+                    {% endif %}
+                </div>
+                <div class="swiper dashboard-swiper" id="{{ section.swiper_id }}">
+                    <div class="swiper-wrapper">
+                        <div class="swiper-slide">
+                            <div class="dashboard-card text-center p-4">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
                             </div>
                         </div>
                     </div>
+                    <div class="swiper-button-next"></div>
+                    <div class="swiper-button-prev"></div>
                 </div>
-                <div class="swiper-button-next"></div>
-                <div class="swiper-button-prev"></div>
-            </div>
-        </section>
-
-        <!-- Want to Read -->
-        <section class="mb-4 dashboard-section">
-            <div class="d-flex justify-content-between align-items-center mb-3 px-2">
-                <h4 class="m-0"><i class="bi bi-bookmark-star-fill text-warning me-2"></i>Want to Read</h4>
-                <a href="/to-read" class="btn btn-sm btn-link text-decoration-none">View All</a>
-            </div>
-            <div class="swiper dashboard-swiper" id="wantToReadSwiper">
-                <div class="swiper-wrapper">
-                    <!-- Loaded dynamically by loadWantToRead() -->
-                    <div class="swiper-slide">
-                        <div class="dashboard-card text-center p-4">
-                            <div class="spinner-border text-primary" role="status">
-                                <span class="visually-hidden">Loading...</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="swiper-button-next"></div>
-                <div class="swiper-button-prev"></div>
-            </div>
-        </section>
-
-        <!-- Continue Reading -->
-        <section class="mb-4 dashboard-section" id="continueReadingSection">
-            <div class="d-flex justify-content-between align-items-center mb-3 px-2">
-                <h4 class="m-0"><i class="bi bi-book-half text-info me-2"></i>Continue Reading</h4>
-                <button class="btn btn-sm btn-link text-decoration-none" onclick="loadContinueReading()">View All</button>
-            </div>
-            <div class="swiper dashboard-swiper" id="continueReadingSwiper">
-                <div class="swiper-wrapper">
-                    <!-- Loaded dynamically by loadContinueReadingSwiper() -->
-                    <div class="swiper-slide">
-                        <div class="dashboard-card text-center p-4">
-                            <div class="spinner-border text-primary" role="status">
-                                <span class="visually-hidden">Loading...</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="swiper-button-next"></div>
-                <div class="swiper-button-prev"></div>
-            </div>
-        </section>
-
-        {% if rec_enabled %}
-        <!-- Discover / Recommendations -->
-        <section class="mb-4 dashboard-section" id="discoverSection">
-            <div class="d-flex justify-content-between align-items-center mb-3 px-2">
-                <h4 class="m-0"><i class="bi bi-stars text-warning me-2"></i>Discover</h4>
-                <button class="btn btn-sm btn-outline-primary" onclick="refreshRecommendations()">
-                    <i class="bi bi-arrow-clockwise"></i> Refresh
-                </button>
-            </div>
-
-            <div class="position-relative">
-                <!-- Loading State -->
-                <div id="recommendationsLoading" class="text-center p-5" style="display: none;">
-                    <div class="spinner-border text-primary" role="status">
-                        <span class="visually-hidden">Loading...</span>
-                    </div>
-                    <p class="mt-2 text-muted">Consulting the Oracle...</p>
-                </div>
-
-                <!-- Initial Search State (Empty) -->
-                <div id="recommendationsPlaceholder" class="text-center p-5 text-muted">
-                    <i class="bi bi-lightbulb fs-1 mb-3"></i>
-                    <p>Click Refresh to get AI-powered recommendations based on your reading history.</p>
-                </div>
-
-                <!-- Results Grid -->
-                <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 row-cols-xl-5 g-3" id="recommendationsGrid">
-                    <!-- Cards injected here -->
-                </div>
-            </div>
-        </section>
-        {% endif %}
-        <!-- Recently Added -->
-        <section class="mb-4 dashboard-section">
-            <div class="d-flex justify-content-between align-items-center mb-3 px-2">
-                <h4 class="m-0"><i class="bi bi-clock-history text-primary me-2"></i>Recently Added</h4>
-                <button class="btn btn-sm btn-link text-decoration-none" onclick="loadRecentlyAdded()">View All</button>
-            </div>
-            <div class="swiper dashboard-swiper" id="recentAddedSwiper">
-                <div class="swiper-wrapper">
-                    <!-- Loaded dynamically by loadRecentlyAddedSwiper() -->
-                    <div class="swiper-slide">
-                        <div class="dashboard-card text-center p-4">
-                            <div class="spinner-border text-primary" role="status">
-                                <span class="visually-hidden">Loading...</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="swiper-button-next"></div>
-                <div class="swiper-button-prev"></div>
-            </div>
-        </section>
+            </section>
+            {% endif %}
+        {% endfor %}
     </div>
     <div id="loading-indicator" class="text-center py-5">
         <div class="spinner-border text-primary" role="status">
             <span class="visually-hidden">Loading...</span>
         </div>
     </div>
-    <!-- Library Section -->
-    <section class="mb-4 dashboard-section" id="library-section" style="display: none;">
-        <div class="d-flex justify-content-between align-items-center mb-3 px-2">
-            <h4 class="m-0" id="library-header-title"><i class="bi bi-collection-fill text-primary me-2"></i>Library</h4>
-        </div>
-        <div id="file-grid" class="file-grid">
-            <!-- Grid items will be populated by JS -->
-        </div>
-        <div id="empty-state" class="text-center py-5" style="display: none;">
-            <i class="bi bi-folder2-open display-1 text-muted"></i>
-            <p class="lead text-muted mt-3">This folder is empty</p>
-        </div>
-        <nav id="pagination-controls" aria-label="File browser pagination" class="mt-4" style="display: none;">
-            <ul class="pagination justify-content-center" id="pagination-list">
-                <!-- Pagination items will be populated by JS -->
-            </ul>
-        </nav>
-    </section>
 </div>
 <!-- Template for Grid Item -->
 <template id="grid-item-template">

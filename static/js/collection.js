@@ -132,12 +132,15 @@ async function loadDirectory(path, preservePage = false, forceRefresh = false) {
     setLoading(true);
     currentPath = path;
 
-    // Show/hide dashboard sections based on path (only show at library root level)
+    // Show/hide dashboard swiper sections based on path (only show at library root level)
+    // Library section visibility is managed separately by renderGrid()
     const dashboardSections = document.getElementById('dashboard-sections');
     if (dashboardSections) {
         const isRoot = !path || path === '/' ||
             (path.startsWith('/') && path.split('/').filter(Boolean).length <= 1);
-        dashboardSections.style.display = isRoot ? 'block' : 'none';
+        dashboardSections.querySelectorAll('.dashboard-section:not(#library-section)').forEach(el => {
+            el.style.display = isRoot ? '' : 'none';
+        });
     }
 
     // Update URL without reloading - use clean URL format
@@ -834,10 +837,12 @@ async function loadRecentlyAdded(preservePage = false) {
             searchInput.placeholder = 'Search recently added files...';
         }
 
-        // Hide dashboard sections
+        // Hide dashboard swiper sections (not library)
         const dashboardSections = document.getElementById('dashboard-sections');
         if (dashboardSections) {
-            dashboardSections.style.display = 'none';
+            dashboardSections.querySelectorAll('.dashboard-section:not(#library-section)').forEach(el => {
+                el.style.display = 'none';
+            });
         }
 
         // Show Folder View button to allow returning to dashboard
@@ -913,10 +918,12 @@ async function loadContinueReading(preservePage = false) {
             searchInput.placeholder = 'Search in-progress comics...';
         }
 
-        // Hide dashboard sections
+        // Hide dashboard swiper sections (not library)
         const dashboardSections = document.getElementById('dashboard-sections');
         if (dashboardSections) {
-            dashboardSections.style.display = 'none';
+            dashboardSections.querySelectorAll('.dashboard-section:not(#library-section)').forEach(el => {
+                el.style.display = 'none';
+            });
         }
 
         // Show Folder View button to allow returning to dashboard

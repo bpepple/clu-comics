@@ -4849,6 +4849,42 @@ def save_styling_config():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/config/dashboard', methods=['POST'])
+def save_dashboard_config():
+    """Save dashboard layout settings via AJAX."""
+    from database import set_user_preference
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No data provided"}), 400
+
+        valid_ids = {'favorites', 'want_to_read', 'continue_reading', 'discover', 'recently_added', 'library'}
+
+        # Validate and sanitize order
+        raw_order = data.get("dashboardOrder", [])
+        if isinstance(raw_order, str):
+            raw_order = [s.strip() for s in raw_order.split(',') if s.strip()]
+        order = [s for s in raw_order if s in valid_ids]
+        # Append any missing sections at the end to prevent data loss
+        for sid in valid_ids:
+            if sid not in order:
+                order.append(sid)
+
+        # Validate hidden list
+        raw_hidden = data.get("dashboardHidden", [])
+        if isinstance(raw_hidden, str):
+            raw_hidden = [s.strip() for s in raw_hidden.split(',') if s.strip()]
+        hidden = [s for s in raw_hidden if s in valid_ids]
+
+        set_user_preference('dashboard_order', order, category='dashboard')
+        set_user_preference('dashboard_hidden', hidden, category='dashboard')
+
+        return jsonify({"success": True, "message": "Dashboard settings saved"})
+    except Exception as e:
+        app_logger.error(f"Error saving dashboard config: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/config/recommendations', methods=['POST'])
 def save_recommendations_config():
     """Save recommendation settings via AJAX."""
@@ -4952,6 +4988,8 @@ def config_page():
     # Ensure SETTINGS section is a dictionary before accessing
     settings = config["SETTINGS"] if "SETTINGS" in config else {}
 
+    from database import get_user_preference
+    from routes.collection import get_dashboard_order
     return render_template(
         "config.html",
         watch=settings.get("WATCH", "/temp"),
@@ -4992,7 +5030,9 @@ def config_page():
         rec_enabled=settings.get("REC_ENABLED", "True") == "True",
         rec_provider=settings.get("REC_PROVIDER", "gemini"),
         rec_api_key=settings.get("REC_API_KEY", ""),
-        rec_model=settings.get("REC_MODEL", "gemini-2.0-flash")
+        rec_model=settings.get("REC_MODEL", "gemini-2.0-flash"),
+        dashboard_order=get_dashboard_order(),
+        dashboard_hidden=get_user_preference('dashboard_hidden', default=[])
     )
 
 #########################
@@ -5124,14 +5164,16 @@ def stream_logs(script_type):
 #########################
 @app.route('/')
 def index():
+    from routes.collection import get_dashboard_sections
     # These environment variables are set/updated by load_config_into_env()
     watch = config.get("SETTINGS", "WATCH", fallback="/temp")
     convert_subdirectories = config.getboolean('SETTINGS', 'CONVERT_SUBDIRECTORIES', fallback=False)
-    return render_template('collection.html', 
-                           watch=watch, 
-                           config=app.config, 
+    return render_template('collection.html',
+                           watch=watch,
+                           config=app.config,
                            convertSubdirectories=convert_subdirectories,
-                           rec_enabled=config.get("SETTINGS", "REC_ENABLED", fallback="True") == "True")
+                           rec_enabled=config.get("SETTINGS", "REC_ENABLED", fallback="True") == "True",
+                           dashboard_sections=get_dashboard_sections())
     
 #########################
 #        App Logs       #
