@@ -259,6 +259,9 @@ app_logger.info("📅 GetComics scheduler initialized")
 app_state.weekly_packs_scheduler.start()
 app_logger.info("📅 Weekly Packs scheduler initialized")
 
+app_state.komga_scheduler.start()
+app_logger.info("📅 Komga sync scheduler initialized")
+
 # Function to perform scheduled series sync
 def scheduled_series_sync():
     """Sync all mapped series from Metron API on schedule."""
@@ -1074,6 +1077,238 @@ def configure_weekly_packs_schedule():
 
     except Exception as e:
         app_logger.error(f"Failed to configure weekly packs schedule: {e}")
+
+
+#########################
+# Komga Reading Sync    #
+#########################
+
+def map_komga_path(komga_path, komga_prefix, clu_prefix):
+    """
+    Convert a Komga file path to a CLU file path using prefix mapping.
+
+    Example:
+        komga_path:   /comics/Marvel/Spider-Man 001.cbz
+        komga_prefix: /comics
+        clu_prefix:   /data
+        result:       /data/Marvel/Spider-Man 001.cbz
+    """
+    if not komga_prefix or not clu_prefix:
+        return komga_path
+
+    # Normalize path separators
+    komga_path = komga_path.replace('\\', '/')
+    komga_prefix = komga_prefix.rstrip('/').replace('\\', '/')
+    clu_prefix = clu_prefix.rstrip('/').replace('\\', '/')
+
+    if komga_path.startswith(komga_prefix):
+        relative = komga_path[len(komga_prefix):]
+        return clu_prefix + relative
+
+    return komga_path
+
+
+def find_clu_file_by_name(filename):
+    """
+    Search CLU's file_index for a file by exact filename.
+    Used as a fallback when Komga path mapping doesn't find a file.
+
+    Args:
+        filename: The filename to search for (e.g., 'Spider-Man 001.cbz')
+
+    Returns:
+        Matched CLU file path, or None
+    """
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return None
+        c = conn.cursor()
+        c.execute('''
+            SELECT path FROM file_index
+            WHERE name = ? AND type = 'file'
+            LIMIT 1
+        ''', (filename,))
+        row = c.fetchone()
+        conn.close()
+        return row['path'] if row else None
+    except Exception:
+        return None
+
+
+def run_komga_sync():
+    """
+    Sync reading history and progress from Komga to CLU.
+
+    Phase 1: Import completed reads into issues_read table
+    Phase 2: Import in-progress positions into reading_positions table
+    """
+    from database import (
+        get_komga_config, is_komga_book_synced, mark_komga_book_synced,
+        update_komga_last_sync
+    )
+    from models.komga import KomgaClient, extract_book_info
+
+    cfg = get_komga_config()
+    if not cfg or not cfg.get('server_url'):
+        app_logger.warning("Komga sync: not configured")
+        return {'success': False, 'error': 'Komga not configured'}
+
+    if not cfg.get('username') or not cfg.get('password'):
+        app_logger.warning("Komga sync: credentials not set")
+        return {'success': False, 'error': 'Komga credentials not set'}
+
+    try:
+        client = KomgaClient(cfg['server_url'], cfg['username'], cfg['password'])
+    except Exception as e:
+        app_logger.error(f"Komga sync: failed to create client: {e}")
+        return {'success': False, 'error': str(e)}
+
+    komga_prefix = cfg.get('path_prefix_komga', '').rstrip('/')
+    clu_prefix = cfg.get('path_prefix_clu', '').rstrip('/')
+
+    read_count = 0
+    progress_count = 0
+    skip_count = 0
+    no_match_count = 0
+
+    app_logger.info("🔄 Starting Komga reading sync...")
+    start_time = time.time()
+
+    # Phase 1: Sync completed reads
+    try:
+        for book in client.get_all_read_books():
+            info = extract_book_info(book)
+            book_id = info['id']
+
+            if is_komga_book_synced(book_id, 'read'):
+                skip_count += 1
+                continue
+
+            # Map Komga path to CLU path
+            clu_path = map_komga_path(info['url'], komga_prefix, clu_prefix)
+
+            # If mapped path doesn't exist, try filename fallback
+            if not clu_path or not os.path.exists(clu_path):
+                clu_path = find_clu_file_by_name(info['name'])
+
+            if not clu_path or not os.path.exists(clu_path):
+                app_logger.debug(f"Komga sync: no CLU match for {info['url']} ({info['name']})")
+                no_match_count += 1
+                continue
+
+            # Mark as read in CLU using existing function
+            mark_issue_read(
+                issue_path=clu_path,
+                read_at=info['read_date'],
+                page_count=info['page_count']
+            )
+            mark_komga_book_synced(book_id, info['url'], clu_path, 'read')
+            read_count += 1
+    except Exception as e:
+        app_logger.error(f"Komga sync phase 1 (reads) error: {e}")
+
+    # Phase 2: Sync in-progress reading positions
+    try:
+        from database import save_reading_position
+        for book in client.get_all_in_progress_books():
+            info = extract_book_info(book)
+            book_id = info['id']
+
+            clu_path = map_komga_path(info['url'], komga_prefix, clu_prefix)
+            if not clu_path or not os.path.exists(clu_path):
+                clu_path = find_clu_file_by_name(info['name'])
+
+            if not clu_path or not os.path.exists(clu_path):
+                app_logger.debug(f"Komga sync: no CLU match for in-progress {info['name']}")
+                continue
+
+            save_reading_position(
+                comic_path=clu_path,
+                page_number=info['current_page'],
+                total_pages=info['page_count']
+            )
+            mark_komga_book_synced(book_id, info['url'], clu_path, 'progress')
+            progress_count += 1
+    except Exception as e:
+        app_logger.error(f"Komga sync phase 2 (progress) error: {e}")
+
+    update_komga_last_sync(read_count, progress_count)
+
+    # Clear stats caches so new data shows up
+    clear_stats_cache_keys(['library_stats', 'reading_history', 'reading_heatmap'])
+
+    elapsed = time.time() - start_time
+    app_logger.info(
+        f"✅ Komga sync completed in {elapsed:.2f}s: "
+        f"{read_count} read, {progress_count} in-progress, "
+        f"{skip_count} skipped, {no_match_count} unmatched"
+    )
+
+    return {
+        'success': True,
+        'read_count': read_count,
+        'progress_count': progress_count,
+        'skip_count': skip_count,
+        'no_match_count': no_match_count,
+        'elapsed': round(elapsed, 2)
+    }
+
+
+def scheduled_komga_sync():
+    """Run Komga reading sync on schedule."""
+    try:
+        app_logger.info("🔄 Starting scheduled Komga reading sync...")
+        run_komga_sync()
+    except Exception as e:
+        app_logger.error(f"❌ Scheduled Komga sync failed: {e}")
+
+
+def configure_komga_sync_schedule():
+    """Configure the Komga sync schedule based on database settings."""
+    try:
+        from database import get_komga_config
+        cfg = get_komga_config()
+        if not cfg:
+            return
+
+        app_state.komga_scheduler.remove_all_jobs()
+
+        frequency = cfg.get('frequency', 'disabled')
+        if frequency == 'disabled':
+            app_logger.info("📅 Scheduled Komga sync is disabled")
+            return
+
+        time_parts = cfg.get('time', '05:00').split(':')
+        hour = int(time_parts[0])
+        minute = int(time_parts[1])
+
+        if frequency == 'daily':
+            trigger = CronTrigger(hour=hour, minute=minute)
+            app_state.komga_scheduler.add_job(
+                scheduled_komga_sync,
+                trigger=trigger,
+                id='komga_sync',
+                name='Daily Komga Reading Sync',
+                replace_existing=True
+            )
+            app_logger.info(f"📅 Scheduled daily Komga sync at {cfg['time']}")
+
+        elif frequency == 'weekly':
+            weekday = int(cfg.get('weekday', 0))
+            trigger = CronTrigger(day_of_week=weekday, hour=hour, minute=minute)
+            app_state.komga_scheduler.add_job(
+                scheduled_komga_sync,
+                trigger=trigger,
+                id='komga_sync',
+                name='Weekly Komga Reading Sync',
+                replace_existing=True
+            )
+            days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+            app_logger.info(f"📅 Scheduled weekly Komga sync on {days[weekday]} at {cfg['time']}")
+
+    except Exception as e:
+        app_logger.error(f"Failed to configure Komga sync schedule: {e}")
 
 
 # Thread pool for thumbnail generation
@@ -5703,6 +5938,9 @@ def start_background_services():
     # Configure Weekly Packs schedule from database
     configure_weekly_packs_schedule()
 
+    # Configure Komga reading sync schedule from database
+    configure_komga_sync_schedule()
+
     # Start monitor if enabled
     if os.environ.get("MONITOR", "").strip().lower() == "yes":
         app_logger.info("MONITOR=yes detected. Starting monitor.py...")
@@ -5716,6 +5954,112 @@ def start_background_services():
 
 # Start background services when module is imported (works with Gunicorn)
 start_background_services()
+
+
+#########################
+# Komga API Endpoints   #
+#########################
+
+@app.route('/api/komga/config', methods=['GET'])
+def api_get_komga_config():
+    """Get current Komga sync configuration (password masked)."""
+    from database import get_komga_config
+    cfg = get_komga_config()
+    if cfg:
+        # Mask password for display
+        cfg['password'] = '***' if cfg.get('password') else ''
+    return jsonify({"success": True, "config": cfg or {}})
+
+
+@app.route('/api/komga/config', methods=['POST'])
+def api_save_komga_config():
+    """Save Komga sync configuration."""
+    from database import save_komga_config as db_save_komga_config
+    data = request.get_json()
+
+    success = db_save_komga_config(
+        server_url=data.get('server_url', ''),
+        username=data.get('username', ''),
+        password=data.get('password', ''),
+        path_prefix_komga=data.get('path_prefix_komga', ''),
+        path_prefix_clu=data.get('path_prefix_clu', ''),
+        enabled=data.get('enabled', False),
+        frequency=data.get('frequency', 'disabled'),
+        time=data.get('time', '05:00'),
+        weekday=data.get('weekday', 0)
+    )
+
+    if success:
+        configure_komga_sync_schedule()
+        return jsonify({"success": True, "message": "Komga configuration saved"})
+    return jsonify({"success": False, "error": "Failed to save configuration"}), 500
+
+
+@app.route('/api/komga/test', methods=['POST'])
+def api_test_komga_connection():
+    """Test Komga server connectivity."""
+    from database import get_komga_config
+    from models.komga import KomgaClient
+
+    cfg = get_komga_config()
+    if not cfg or not cfg.get('server_url'):
+        return jsonify({"success": False, "valid": False, "error": "Komga not configured. Save settings first."})
+
+    username = cfg.get('username', '')
+    password = cfg.get('password', '')
+
+    app_logger.info(f"Komga test: url={cfg['server_url']}, user={'set' if username else 'empty'}, pass={'set' if password else 'empty'}")
+
+    if not username or not password:
+        return jsonify({"success": False, "valid": False, "error": "Komga credentials not set. Save credentials first."})
+
+    try:
+        client = KomgaClient(cfg['server_url'], username, password)
+        valid, details = client.test_connection()
+        if valid:
+            return jsonify({"success": True, "valid": True, "message": details})
+        else:
+            return jsonify({"success": True, "valid": False, "error": details})
+    except Exception as e:
+        app_logger.error(f"Komga connection test error: {e}")
+        return jsonify({"success": False, "valid": False, "error": str(e)})
+
+
+@app.route('/api/komga/sync', methods=['POST'])
+def api_sync_komga_now():
+    """Manually trigger Komga reading sync."""
+    threading.Thread(target=run_komga_sync, daemon=True).start()
+    return jsonify({"success": True, "message": "Komga sync started in background"})
+
+
+@app.route('/api/komga/sync/status', methods=['GET'])
+def api_komga_sync_status():
+    """Get Komga sync status and statistics."""
+    from database import get_komga_sync_stats, get_komga_config
+
+    stats = get_komga_sync_stats()
+    cfg = get_komga_config()
+
+    # Get next scheduled run
+    next_run = None
+    try:
+        jobs = app_state.komga_scheduler.get_jobs()
+        if jobs:
+            next_run_time = jobs[0].next_run_time
+            if next_run_time:
+                next_run = next_run_time.strftime('%Y-%m-%d %H:%M')
+    except Exception:
+        pass
+
+    return jsonify({
+        "success": True,
+        "total_synced_read": stats.get('total_synced_read', 0),
+        "total_synced_progress": stats.get('total_synced_progress', 0),
+        "last_sync": stats.get('last_sync'),
+        "last_sync_read_count": cfg.get('last_sync_read_count', 0) if cfg else 0,
+        "last_sync_progress_count": cfg.get('last_sync_progress_count', 0) if cfg else 0,
+        "next_run": next_run
+    })
 
 
 @app.route('/api/metadata-scan-status', methods=['GET'])

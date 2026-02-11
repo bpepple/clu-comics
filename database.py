@@ -605,6 +605,41 @@ def init_db():
         c.execute('CREATE INDEX IF NOT EXISTS idx_provider_cache_lookup ON provider_cache(provider_type, cache_type, provider_id)')
         c.execute('CREATE INDEX IF NOT EXISTS idx_provider_cache_expires ON provider_cache(expires_at)')
 
+        # Create Komga sync configuration table (single-row)
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS komga_sync_config (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                server_url TEXT NOT NULL DEFAULT '',
+                credentials_encrypted BLOB,
+                credentials_nonce BLOB,
+                path_prefix_komga TEXT NOT NULL DEFAULT '',
+                path_prefix_clu TEXT NOT NULL DEFAULT '',
+                enabled INTEGER DEFAULT 0,
+                last_sync TIMESTAMP,
+                last_sync_read_count INTEGER DEFAULT 0,
+                last_sync_progress_count INTEGER DEFAULT 0,
+                frequency TEXT NOT NULL DEFAULT 'disabled',
+                time TEXT NOT NULL DEFAULT '05:00',
+                weekday INTEGER DEFAULT 0,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        c.execute('INSERT OR IGNORE INTO komga_sync_config (id, server_url) VALUES (1, "")')
+
+        # Create Komga sync log table (tracks which books have been synced)
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS komga_sync_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                komga_book_id TEXT NOT NULL,
+                komga_path TEXT NOT NULL,
+                clu_path TEXT,
+                sync_type TEXT NOT NULL,
+                synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(komga_book_id, sync_type)
+            )
+        ''')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_komga_sync_book ON komga_sync_log(komga_book_id)')
+
         # Migration: Auto-create default library if table is empty and /data exists
         c.execute('SELECT COUNT(*) FROM libraries')
         if c.fetchone()[0] == 0:
@@ -6140,3 +6175,291 @@ def remove_library_provider(library_id: int, provider_type: str) -> bool:
     except Exception as e:
         app_logger.error(f"Failed to remove provider {provider_type} from library {library_id}: {e}")
         return False
+
+
+#########################
+#   Komga Sync Functions #
+#########################
+
+def get_komga_config():
+    """
+    Get Komga sync configuration from the database.
+    Decrypts stored credentials before returning.
+
+    Returns:
+        Dict with config fields, or None on error
+    """
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return None
+        c = conn.cursor()
+        c.execute('SELECT * FROM komga_sync_config WHERE id = 1')
+        row = c.fetchone()
+        conn.close()
+
+        if not row:
+            return None
+
+        result = {
+            'server_url': row['server_url'] or '',
+            'username': '',
+            'password': '',
+            'path_prefix_komga': row['path_prefix_komga'] or '',
+            'path_prefix_clu': row['path_prefix_clu'] or '',
+            'enabled': bool(row['enabled']),
+            'last_sync': row['last_sync'],
+            'last_sync_read_count': row['last_sync_read_count'] or 0,
+            'last_sync_progress_count': row['last_sync_progress_count'] or 0,
+            'frequency': row['frequency'] or 'disabled',
+            'time': row['time'] or '05:00',
+            'weekday': row['weekday'] or 0,
+        }
+
+        # Decrypt credentials if present
+        if row['credentials_encrypted'] and row['credentials_nonce']:
+            try:
+                from models.providers.crypto import decrypt_credentials, is_crypto_available
+                if is_crypto_available():
+                    creds = decrypt_credentials(
+                        row['credentials_encrypted'],
+                        row['credentials_nonce']
+                    )
+                    result['username'] = creds.get('username', '')
+                    result['password'] = creds.get('password', '')
+            except Exception as e:
+                app_logger.error(f"Failed to decrypt Komga credentials: {e}")
+
+        return result
+    except Exception as e:
+        app_logger.error(f"Failed to get Komga config: {e}")
+        return None
+
+
+def save_komga_config(server_url, username='', password='',
+                      path_prefix_komga='', path_prefix_clu='',
+                      enabled=False, frequency='disabled',
+                      time='05:00', weekday=0):
+    """
+    Save Komga sync configuration to the database.
+    Encrypts credentials before storing.
+
+    Args:
+        server_url: Komga server URL
+        username: Komga username
+        password: Komga password (empty string to keep existing)
+        path_prefix_komga: Path prefix as Komga sees it
+        path_prefix_clu: Equivalent path prefix in CLU
+        enabled: Whether sync is enabled
+        frequency: 'disabled', 'daily', or 'weekly'
+        time: Time of day (HH:MM)
+        weekday: Day of week (0=Monday)
+
+    Returns:
+        True on success
+    """
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return False
+
+        # If password is empty, keep existing encrypted credentials
+        credentials_encrypted = None
+        credentials_nonce = None
+
+        if username or password:
+            # If password is provided (not masked), encrypt new credentials
+            if password and password != '***':
+                try:
+                    from models.providers.crypto import encrypt_credentials, is_crypto_available
+                    if is_crypto_available():
+                        creds = {'username': username, 'password': password}
+                        credentials_encrypted, credentials_nonce = encrypt_credentials(creds)
+                except Exception as e:
+                    app_logger.error(f"Failed to encrypt Komga credentials: {e}")
+                    conn.close()
+                    return False
+            else:
+                # Password is masked ('***'), keep existing credentials but update username
+                c = conn.cursor()
+                c.execute('SELECT credentials_encrypted, credentials_nonce FROM komga_sync_config WHERE id = 1')
+                row = c.fetchone()
+                if row and row['credentials_encrypted']:
+                    # Decrypt, update username, re-encrypt
+                    try:
+                        from models.providers.crypto import decrypt_credentials, encrypt_credentials, is_crypto_available
+                        if is_crypto_available():
+                            existing_creds = decrypt_credentials(
+                                row['credentials_encrypted'],
+                                row['credentials_nonce']
+                            )
+                            existing_creds['username'] = username
+                            credentials_encrypted, credentials_nonce = encrypt_credentials(existing_creds)
+                    except Exception as e:
+                        app_logger.error(f"Failed to update Komga credentials: {e}")
+                        # Keep existing credentials
+                        credentials_encrypted = row['credentials_encrypted']
+                        credentials_nonce = row['credentials_nonce']
+                else:
+                    # No existing credentials and password is masked - skip
+                    pass
+
+        if credentials_encrypted is not None:
+            conn.execute('''
+                UPDATE komga_sync_config SET
+                    server_url = ?,
+                    credentials_encrypted = ?,
+                    credentials_nonce = ?,
+                    path_prefix_komga = ?,
+                    path_prefix_clu = ?,
+                    enabled = ?,
+                    frequency = ?,
+                    time = ?,
+                    weekday = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = 1
+            ''', (server_url, credentials_encrypted, credentials_nonce,
+                  path_prefix_komga, path_prefix_clu,
+                  1 if enabled else 0, frequency, time, weekday))
+        else:
+            # Update everything except credentials
+            conn.execute('''
+                UPDATE komga_sync_config SET
+                    server_url = ?,
+                    path_prefix_komga = ?,
+                    path_prefix_clu = ?,
+                    enabled = ?,
+                    frequency = ?,
+                    time = ?,
+                    weekday = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = 1
+            ''', (server_url, path_prefix_komga, path_prefix_clu,
+                  1 if enabled else 0, frequency, time, weekday))
+
+        conn.commit()
+        conn.close()
+        app_logger.info("Komga config saved successfully")
+        return True
+    except Exception as e:
+        app_logger.error(f"Failed to save Komga config: {e}")
+        return False
+
+
+def update_komga_last_sync(read_count=0, progress_count=0):
+    """
+    Update the last sync timestamp and counts.
+
+    Args:
+        read_count: Number of completed reads synced
+        progress_count: Number of in-progress positions synced
+    """
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return
+        conn.execute('''
+            UPDATE komga_sync_config SET
+                last_sync = CURRENT_TIMESTAMP,
+                last_sync_read_count = ?,
+                last_sync_progress_count = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = 1
+        ''', (read_count, progress_count))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        app_logger.error(f"Failed to update Komga last sync: {e}")
+
+
+def is_komga_book_synced(komga_book_id, sync_type='read'):
+    """
+    Check if a Komga book has already been synced.
+
+    Args:
+        komga_book_id: Komga book ID
+        sync_type: 'read' or 'progress'
+
+    Returns:
+        True if already synced
+    """
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return False
+        c = conn.cursor()
+        c.execute('''
+            SELECT 1 FROM komga_sync_log
+            WHERE komga_book_id = ? AND sync_type = ?
+        ''', (komga_book_id, sync_type))
+        result = c.fetchone() is not None
+        conn.close()
+        return result
+    except Exception as e:
+        app_logger.error(f"Failed to check Komga sync status: {e}")
+        return False
+
+
+def mark_komga_book_synced(komga_book_id, komga_path, clu_path, sync_type='read'):
+    """
+    Record that a Komga book has been synced to CLU.
+
+    Args:
+        komga_book_id: Komga book ID
+        komga_path: File path as seen by Komga
+        clu_path: Matched file path in CLU
+        sync_type: 'read' or 'progress'
+
+    Returns:
+        True on success
+    """
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return False
+        conn.execute('''
+            INSERT OR REPLACE INTO komga_sync_log
+                (komga_book_id, komga_path, clu_path, sync_type, synced_at)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ''', (komga_book_id, komga_path, clu_path, sync_type))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        app_logger.error(f"Failed to mark Komga book synced: {e}")
+        return False
+
+
+def get_komga_sync_stats():
+    """
+    Get Komga sync statistics.
+
+    Returns:
+        Dict with total_synced_read, total_synced_progress, last_sync
+    """
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return {'total_synced_read': 0, 'total_synced_progress': 0, 'last_sync': None}
+
+        c = conn.cursor()
+
+        c.execute("SELECT COUNT(*) FROM komga_sync_log WHERE sync_type = 'read'")
+        total_read = c.fetchone()[0]
+
+        c.execute("SELECT COUNT(*) FROM komga_sync_log WHERE sync_type = 'progress'")
+        total_progress = c.fetchone()[0]
+
+        c.execute('SELECT last_sync FROM komga_sync_config WHERE id = 1')
+        row = c.fetchone()
+        last_sync = row['last_sync'] if row else None
+
+        conn.close()
+        return {
+            'total_synced_read': total_read,
+            'total_synced_progress': total_progress,
+            'last_sync': last_sync
+        }
+    except Exception as e:
+        app_logger.error(f"Failed to get Komga sync stats: {e}")
+        return {'total_synced_read': 0, 'total_synced_progress': 0, 'last_sync': None}

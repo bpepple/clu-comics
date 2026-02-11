@@ -530,6 +530,131 @@
                     </div>
                 </div>
 
+                <!-- Komga Reading Sync -->
+                <div class="container p-4 border rounded shadow-sm mb-4">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div>
+                            <h4><i class="bi bi-book me-2"></i>Komga Reading Sync</h4>
+                            <p class="text-muted mb-0">Sync reading history and progress from your Komga server to CLU.</p>
+                        </div>
+                        <span id="komgaStatusBadge" class="badge bg-secondary">
+                            <i class="bi bi-x-circle me-1"></i>Not Configured
+                        </span>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <label for="komgaServerUrl" class="form-label">Server URL</label>
+                            <input type="text" class="form-control" id="komgaServerUrl"
+                                placeholder="http://komga:25600" autocomplete="url">
+                            <small class="form-text text-muted">
+                                Full URL to your Komga server (e.g., http://192.168.1.100:25600)
+                            </small>
+                        </div>
+                        <div class="col-md-3">
+                            <label for="komgaUsername" class="form-label">Username</label>
+                            <input type="text" class="form-control" id="komgaUsername"
+                                placeholder="user@email.com" autocomplete="username">
+                        </div>
+                        <div class="col-md-3">
+                            <label for="komgaPassword" class="form-label">Password</label>
+                            <div class="input-group">
+                                <input type="password" class="form-control password-field"
+                                    id="komgaPassword" placeholder="Password" autocomplete="current-password">
+                                <button class="btn btn-outline-secondary toggle-password"
+                                    type="button" data-target="komgaPassword">
+                                    <i class="bi bi-eye"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr class="my-3">
+                    <h6>Path Mapping</h6>
+                    <p class="text-muted small">Map Komga's file paths to CLU's file paths. If your comics are mounted
+                        at different paths in each container, configure the prefix mapping here.</p>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <label for="komgaPathPrefix" class="form-label">Komga Path Prefix</label>
+                            <input type="text" class="form-control" id="komgaPathPrefix"
+                                placeholder="/comics">
+                            <small class="form-text text-muted">
+                                The path prefix as Komga sees it (e.g., /comics)
+                            </small>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="cluPathPrefix" class="form-label">CLU Path Prefix</label>
+                            <input type="text" class="form-control" id="cluPathPrefix"
+                                placeholder="/data">
+                            <small class="form-text text-muted">
+                                The equivalent path prefix in CLU (e.g., /data)
+                            </small>
+                        </div>
+                    </div>
+
+                    <hr class="my-3">
+                    <h6>Sync Schedule</h6>
+                    <div class="row">
+                        <div class="col-md-3">
+                            <label for="komgaSyncFrequency" class="form-label">Frequency</label>
+                            <select class="form-select" id="komgaSyncFrequency">
+                                <option value="disabled">Disabled</option>
+                                <option value="daily">Daily</option>
+                                <option value="weekly">Weekly</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label for="komgaSyncTime" class="form-label">Time</label>
+                            <input type="time" class="form-control" id="komgaSyncTime" value="05:00">
+                        </div>
+                        <div class="col-md-3" id="komgaWeekdayGroup" style="display:none;">
+                            <label for="komgaSyncWeekday" class="form-label">Day</label>
+                            <select class="form-select" id="komgaSyncWeekday">
+                                <option value="0">Monday</option>
+                                <option value="1">Tuesday</option>
+                                <option value="2">Wednesday</option>
+                                <option value="3">Thursday</option>
+                                <option value="4">Friday</option>
+                                <option value="5">Saturday</option>
+                                <option value="6">Sunday</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Sync Status -->
+                    <div class="alert alert-info mt-3" id="komgaSyncStatus" style="display:none;">
+                        <div class="row">
+                            <div class="col-md-4">
+                                <strong>Last Sync:</strong><br>
+                                <span id="komgaLastSync">Never</span>
+                            </div>
+                            <div class="col-md-4">
+                                <strong>Total Read Synced:</strong><br>
+                                <span id="komgaReadCount">0</span>
+                            </div>
+                            <div class="col-md-4">
+                                <strong>Total Progress Synced:</strong><br>
+                                <span id="komgaProgressCount">0</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="mt-3 d-flex gap-2">
+                        <button type="button" class="btn btn-primary btn-sm" onclick="saveKomgaConfig()">
+                            <i class="bi bi-floppy me-1"></i>Save
+                        </button>
+                        <button type="button" class="btn btn-outline-info btn-sm" id="komgaTestBtn"
+                            onclick="testKomgaConnection()">
+                            <i class="bi bi-lightning me-1"></i>Test Connection
+                        </button>
+                        <button type="button" class="btn btn-outline-success btn-sm" id="komgaSyncBtn"
+                            onclick="syncKomgaNow()">
+                            <i class="bi bi-arrow-repeat me-1"></i>Sync Now
+                        </button>
+                    </div>
+                </div>
+
                 <!-- Save Button for Tab 2 -->
                 <div class="mb-3 text-center">
                     <button type="button" class="btn btn-primary" onclick="saveDownloadApiSettings()">
@@ -1814,6 +1939,15 @@
 
         // Load getcomics schedule on page load
         loadGetcomicsSchedule();
+
+        // Load Komga config on page load
+        loadKomgaConfig();
+
+        // Show/hide Komga weekday selector based on frequency
+        document.getElementById('komgaSyncFrequency').addEventListener('change', function () {
+            const weekdayGroup = document.getElementById('komgaWeekdayGroup');
+            weekdayGroup.style.display = this.value === 'weekly' ? 'block' : 'none';
+        });
     });
 
     // File Index Management Functions
@@ -2201,6 +2335,204 @@
                 button.innerHTML = originalText;
                 button.disabled = false;
             });
+    }
+
+    // =========================================
+    // Komga Reading Sync Functions
+    // =========================================
+
+    function loadKomgaConfig() {
+        fetch('/api/komga/config', {
+            headers: { 'Cache-Control': 'no-cache' }
+        })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success && data.config) {
+                    const cfg = data.config;
+                    document.getElementById('komgaServerUrl').value = cfg.server_url || '';
+                    document.getElementById('komgaUsername').value = cfg.username || '';
+                    // Don't populate password field if masked
+                    if (cfg.password && cfg.password !== '***') {
+                        document.getElementById('komgaPassword').value = cfg.password;
+                    } else if (cfg.password === '***') {
+                        document.getElementById('komgaPassword').placeholder = '********** (saved)';
+                    }
+                    document.getElementById('komgaPathPrefix').value = cfg.path_prefix_komga || '';
+                    document.getElementById('cluPathPrefix').value = cfg.path_prefix_clu || '';
+                    document.getElementById('komgaSyncFrequency').value = cfg.frequency || 'disabled';
+                    document.getElementById('komgaSyncTime').value = cfg.time || '05:00';
+                    document.getElementById('komgaSyncWeekday').value = cfg.weekday || '0';
+
+                    // Show weekday selector if weekly
+                    document.getElementById('komgaWeekdayGroup').style.display =
+                        cfg.frequency === 'weekly' ? 'block' : 'none';
+
+                    // Update status badge
+                    updateKomgaStatusBadge(cfg);
+
+                    // Load sync status
+                    loadKomgaSyncStatus();
+                }
+            })
+            .catch(error => {
+                console.error('Error loading Komga config:', error);
+            });
+    }
+
+    function updateKomgaStatusBadge(cfg) {
+        const badge = document.getElementById('komgaStatusBadge');
+        if (!cfg || !cfg.server_url) {
+            badge.className = 'badge bg-secondary';
+            badge.innerHTML = '<i class="bi bi-x-circle me-1"></i>Not Configured';
+        } else if (cfg.password === '***' || cfg.password) {
+            badge.className = 'badge bg-warning';
+            badge.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Not Verified';
+        } else {
+            badge.className = 'badge bg-secondary';
+            badge.innerHTML = '<i class="bi bi-x-circle me-1"></i>No Credentials';
+        }
+    }
+
+    function loadKomgaSyncStatus() {
+        fetch('/api/komga/sync/status', {
+            headers: { 'Cache-Control': 'no-cache' }
+        })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const statusDiv = document.getElementById('komgaSyncStatus');
+                    const hasSync = data.last_sync || data.total_synced_read > 0 || data.total_synced_progress > 0;
+
+                    if (hasSync) {
+                        statusDiv.style.display = 'block';
+                        document.getElementById('komgaLastSync').textContent =
+                            data.last_sync ? new Date(data.last_sync).toLocaleString() : 'Never';
+                        document.getElementById('komgaReadCount').textContent = data.total_synced_read || 0;
+                        document.getElementById('komgaProgressCount').textContent = data.total_synced_progress || 0;
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Error loading Komga sync status:', error);
+            });
+    }
+
+    async function saveKomgaConfig() {
+        const btn = event.target.closest('button');
+        const originalHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving...';
+
+        const data = {
+            server_url: document.getElementById('komgaServerUrl').value.trim(),
+            username: document.getElementById('komgaUsername').value.trim(),
+            password: document.getElementById('komgaPassword').value || '***',
+            path_prefix_komga: document.getElementById('komgaPathPrefix').value.trim(),
+            path_prefix_clu: document.getElementById('cluPathPrefix').value.trim(),
+            enabled: true,
+            frequency: document.getElementById('komgaSyncFrequency').value,
+            time: document.getElementById('komgaSyncTime').value,
+            weekday: parseInt(document.getElementById('komgaSyncWeekday').value)
+        };
+
+        try {
+            const response = await fetch('/api/komga/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            const result = await response.json();
+
+            if (result.success) {
+                showToast('Komga configuration saved', 'success');
+                loadKomgaConfig();
+            } else {
+                showToast('Error: ' + (result.error || 'Failed to save'), 'error');
+            }
+        } catch (e) {
+            showToast('Error saving Komga config: ' + e.message, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+        }
+    }
+
+    async function testKomgaConnection() {
+        const btn = document.getElementById('komgaTestBtn');
+        const originalHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Testing...';
+
+        try {
+            const response = await fetch('/api/komga/test', { method: 'POST' });
+            const data = await response.json();
+
+            const badge = document.getElementById('komgaStatusBadge');
+
+            if (data.success && data.valid) {
+                btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Connected!';
+                btn.classList.remove('btn-outline-info');
+                btn.classList.add('btn-success');
+                badge.className = 'badge bg-success';
+                badge.innerHTML = '<i class="bi bi-check-circle me-1"></i>Connected';
+                showToast('Komga connection successful!', 'success');
+
+                setTimeout(() => {
+                    btn.innerHTML = originalHtml;
+                    btn.classList.remove('btn-success');
+                    btn.classList.add('btn-outline-info');
+                    btn.disabled = false;
+                }, 2000);
+            } else {
+                btn.innerHTML = '<i class="bi bi-x-circle me-1"></i>Failed';
+                btn.classList.remove('btn-outline-info');
+                btn.classList.add('btn-danger');
+                badge.className = 'badge bg-warning';
+                badge.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Test Failed';
+                showToast('Connection failed: ' + (data.error || 'Unknown error'), 'error');
+
+                setTimeout(() => {
+                    btn.innerHTML = originalHtml;
+                    btn.classList.remove('btn-danger');
+                    btn.classList.add('btn-outline-info');
+                    btn.disabled = false;
+                }, 2000);
+            }
+        } catch (e) {
+            btn.innerHTML = originalHtml;
+            btn.disabled = false;
+            showToast('Error testing connection: ' + e.message, 'error');
+        }
+    }
+
+    async function syncKomgaNow() {
+        const btn = document.getElementById('komgaSyncBtn');
+        const originalHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Syncing...';
+
+        try {
+            const response = await fetch('/api/komga/sync', { method: 'POST' });
+            const data = await response.json();
+
+            if (data.success) {
+                showToast('Komga sync started in background', 'success');
+                // Poll for completion after a delay
+                setTimeout(() => {
+                    loadKomgaSyncStatus();
+                    btn.innerHTML = originalHtml;
+                    btn.disabled = false;
+                }, 3000);
+            } else {
+                showToast('Error: ' + (data.error || 'Failed to start sync'), 'error');
+                btn.innerHTML = originalHtml;
+                btn.disabled = false;
+            }
+        } catch (e) {
+            showToast('Error starting sync: ' + e.message, 'error');
+            btn.innerHTML = originalHtml;
+            btn.disabled = false;
+        }
     }
 
     // Custom Rename Pattern Preview Functions
