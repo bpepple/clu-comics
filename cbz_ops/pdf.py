@@ -57,7 +57,7 @@ def process_pdf_file(pdf_path):
         os.makedirs(output_folder, exist_ok=True)
         
         # Process pages in batches to reduce memory usage
-        batch_size = 5  # Process 5 pages at a time
+        batch_size = 2  # Process 2 pages at a time (300 DPI uses ~4x more memory per page)
         for batch_start in range(1, total_pages + 1, batch_size):
             batch_end = min(batch_start + batch_size - 1, total_pages)
             
@@ -70,7 +70,7 @@ def process_pdf_file(pdf_path):
                 last_page=batch_end, 
                 thread_count=1,
                 fmt="jpeg",
-                dpi=150  # Reduce DPI to save memory
+                dpi=300  # Match native DPI of most comic PDFs
             )
             
             # Process each page in the batch
@@ -128,7 +128,7 @@ def process_single_page(page, page_number, pdf_name, output_folder):
             page = page.resize((new_width, new_height), Image.LANCZOS)
         
         # Save with optimized settings
-        page.save(page_path, "JPEG", dpi=(96, 96), quality=75, optimize=True)
+        page.save(page_path, "JPEG", quality=92, optimize=True)
         app_logger.info(f"Saved page {page_number} as {page_filename}")
         
     except Exception as e:
@@ -140,7 +140,7 @@ def create_cbz_file(output_folder, cbz_path):
     Create CBZ file using streaming approach to avoid loading all files into memory.
     """
     try:
-        with zipfile.ZipFile(cbz_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as cbz:
+        with zipfile.ZipFile(cbz_path, 'w', zipfile.ZIP_STORED) as cbz:
             # Walk through the folder and add files one by one
             for folder_root, _, folder_files in os.walk(output_folder):
                 for folder_file in folder_files:
