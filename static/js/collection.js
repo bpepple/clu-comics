@@ -4,6 +4,37 @@
  * Handles directory fetching, grid rendering, lazy loading, navigation, and pagination.
  */
 
+// Global variable to store current folder path for XML update
+let updateXmlCurrentPath = '';
+
+// Per-field configuration for Update XML modal
+const updateXmlFieldConfig = {
+  Volume: {
+    hint: 'Enter a 4-digit year (e.g., 2024)',
+    placeholder: 'Enter year',
+    maxlength: 4,
+    validate: (v) => /^\d{4}$/.test(v) ? null : 'Volume must be a 4-digit year'
+  },
+  Publisher: {
+    hint: 'Enter the publisher name (e.g., Marvel Comics)',
+    placeholder: 'Enter publisher',
+    maxlength: null,
+    validate: (v) => v ? null : 'Publisher cannot be empty'
+  },
+  Series: {
+    hint: 'Enter the series name (e.g., The Amazing Spider-Man)',
+    placeholder: 'Enter series',
+    maxlength: null,
+    validate: (v) => v ? null : 'Series cannot be empty'
+  },
+  SeriesGroup: {
+    hint: 'Enter the series group (e.g., Spider-Man)',
+    placeholder: 'Enter series group',
+    maxlength: null,
+    validate: (v) => v ? null : 'Series Group cannot be empty'
+  }
+};
+
 document.addEventListener('DOMContentLoaded', () => {
     // Initialize with path from URL: prefer clean URL path, fallback to query param
     const initialPath = window.INITIAL_PATH ||
@@ -1131,9 +1162,10 @@ function renderGrid(items) {
                     } else {
                         // For folders with files, show full menu
                         dropdownMenu.innerHTML = `
-                        <li><a class="dropdown-item folder-action-thumbnail" href="#"><i class="bi bi-image"></i> Generate Thumbnail</a></li>    
+                        <li><a class="dropdown-item folder-action-thumbnail" href="#"><i class="bi bi-image"></i> Generate Thumbnail</a></li>
                         <li><a class="dropdown-item folder-action-scan" href="#"><i class="bi bi-arrow-clockwise"></i> Scan Files</a></li>
                         <li><a class="dropdown-item folder-action-missing" href="#"><i class="bi bi-file-earmark-text"></i> Missing File Check</a></li>
+                        <li><a class="dropdown-item folder-action-update-xml" href="#"><i class="bi bi-filetype-xml"></i> Update XML</a></li>
                         <li><hr class="dropdown-divider"></li>
                         <li><a class="dropdown-item folder-action-delete text-danger" href="#"><i class="bi bi-trash"></i> Delete</a></li>
                         `;
@@ -1155,6 +1187,16 @@ function renderGrid(items) {
                                 e.preventDefault();
                                 e.stopPropagation();
                                 showDeleteConfirmation(item);
+                            };
+                        }
+
+                        // Bind Update XML action
+                        const updateXmlAction = dropdownMenu.querySelector('.folder-action-update-xml');
+                        if (updateXmlAction) {
+                            updateXmlAction.onclick = (e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                openUpdateXmlModal(item.path, item.name);
                             };
                         }
                     }
@@ -4082,6 +4124,14 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+
+    // Add event listener for Update XML confirm button
+    const updateXmlBtn = document.getElementById('updateXmlConfirmBtn');
+    if (updateXmlBtn) updateXmlBtn.addEventListener('click', submitUpdateXml);
+
+    // Add event listener for Update XML field dropdown change
+    const updateXmlFieldSelect = document.getElementById('updateXmlField');
+    if (updateXmlFieldSelect) updateXmlFieldSelect.addEventListener('change', updateXmlFieldChanged);
 });
 
 // ============================================================================
@@ -5668,4 +5718,128 @@ function refreshCurrentView(preservePage = false, forceRefresh = false) {
     } else {
         loadDirectory(currentPath, preservePage, forceRefresh);
     }
+}
+
+// ============================================================================
+// UPDATE XML FUNCTIONALITY
+// ============================================================================
+
+/**
+ * Update the XML modal input when the field dropdown changes
+ */
+function updateXmlFieldChanged() {
+    const field = document.getElementById('updateXmlField').value;
+    const cfg = updateXmlFieldConfig[field];
+    if (!cfg) return;
+    const input = document.getElementById('updateXmlValue');
+    const hint = document.getElementById('updateXmlHint');
+    input.placeholder = cfg.placeholder;
+    if (cfg.maxlength) {
+        input.setAttribute('maxlength', cfg.maxlength);
+    } else {
+        input.removeAttribute('maxlength');
+    }
+    hint.textContent = cfg.hint;
+}
+
+/**
+ * Open the Update XML modal
+ * @param {string} folderPath - Path to the folder
+ * @param {string} folderName - Display name of the folder
+ */
+function openUpdateXmlModal(folderPath, folderName) {
+    updateXmlCurrentPath = folderPath;
+    document.getElementById('updateXmlFolderName').textContent = folderName;
+    document.getElementById('updateXmlValue').value = '';
+    document.getElementById('updateXmlField').value = 'Volume';
+    updateXmlFieldChanged();
+
+    const modal = new bootstrap.Modal(document.getElementById('updateXmlModal'));
+    modal.show();
+}
+
+/**
+ * Show a toast notification with title, message, and type
+ * @param {string} title - Toast header title
+ * @param {string} message - Toast body message
+ * @param {string} type - 'info', 'success', 'warning', or 'error'
+ */
+function showToast(title, message, type = 'info') {
+    const toastContainer = document.querySelector('.toast-container');
+    if (!toastContainer) {
+        alert(`${title}: ${message}`);
+        return;
+    }
+
+    const bgClass = type === 'error' ? 'danger' : type === 'success' ? 'success' : type === 'warning' ? 'warning' : 'info';
+    const textClass = type === 'warning' ? '' : 'text-white';
+
+    const toastEl = document.createElement('div');
+    toastEl.className = `toast bg-${bgClass} ${textClass}`;
+    toastEl.setAttribute('role', 'alert');
+    toastEl.setAttribute('aria-live', 'assertive');
+    toastEl.setAttribute('aria-atomic', 'true');
+    toastEl.innerHTML = `
+        <div class="toast-header bg-${bgClass} ${textClass}">
+            <strong class="me-auto">${title}</strong>
+            <button type="button" class="btn-close${textClass ? ' btn-close-white' : ''}" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+        <div class="toast-body">${message}</div>
+    `;
+
+    toastContainer.appendChild(toastEl);
+
+    const toast = new bootstrap.Toast(toastEl);
+    toast.show();
+
+    toastEl.addEventListener('hidden.bs.toast', () => {
+        if (toastEl.parentNode === toastContainer) {
+            toastContainer.removeChild(toastEl);
+        }
+    });
+}
+
+/**
+ * Submit the Update XML form
+ */
+function submitUpdateXml() {
+    const field = document.getElementById('updateXmlField').value;
+    const value = document.getElementById('updateXmlValue').value.trim();
+
+    const cfg = updateXmlFieldConfig[field];
+    const validationError = cfg ? cfg.validate(value) : (!value ? 'Please enter a value' : null);
+    if (validationError) {
+        showToast('Validation Error', validationError, 'warning');
+        return;
+    }
+
+    // Close modal
+    bootstrap.Modal.getInstance(document.getElementById('updateXmlModal')).hide();
+
+    // Show progress toast
+    showToast('Updating XML', `Updating ${field} in all CBZ files...`, 'info');
+
+    // Call API
+    fetch('/api/update-xml', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            directory: updateXmlCurrentPath,
+            field: field,
+            value: value
+        })
+    })
+        .then(response => response.json())
+        .then(result => {
+            if (result.error) {
+                showToast('Update Error', result.error, 'error');
+            } else {
+                showToast('Update Complete',
+                    `Updated ${result.updated} file(s), skipped ${result.skipped}`,
+                    result.updated > 0 ? 'success' : 'info');
+            }
+        })
+        .catch(error => {
+            showToast('Update Error', error.message, 'error');
+        });
 }

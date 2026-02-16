@@ -57,6 +57,50 @@ let destLibraryProviders = [];
 // Global variable to store current folder path for XML update
 let updateXmlCurrentPath = '';
 
+// Per-field configuration for Update XML modal
+const updateXmlFieldConfig = {
+  Volume: {
+    hint: 'Enter a 4-digit year (e.g., 2024)',
+    placeholder: 'Enter year',
+    maxlength: 4,
+    validate: (v) => /^\d{4}$/.test(v) ? null : 'Volume must be a 4-digit year'
+  },
+  Publisher: {
+    hint: 'Enter the publisher name (e.g., Marvel Comics)',
+    placeholder: 'Enter publisher',
+    maxlength: null,
+    validate: (v) => v ? null : 'Publisher cannot be empty'
+  },
+  Series: {
+    hint: 'Enter the series name (e.g., The Amazing Spider-Man)',
+    placeholder: 'Enter series',
+    maxlength: null,
+    validate: (v) => v ? null : 'Series cannot be empty'
+  },
+  SeriesGroup: {
+    hint: 'Enter the series group (e.g., Spider-Man)',
+    placeholder: 'Enter series group',
+    maxlength: null,
+    validate: (v) => v ? null : 'Series Group cannot be empty'
+  }
+};
+
+// Update the XML modal input when the field dropdown changes
+function updateXmlFieldChanged() {
+  const field = document.getElementById('updateXmlField').value;
+  const cfg = updateXmlFieldConfig[field];
+  if (!cfg) return;
+  const input = document.getElementById('updateXmlValue');
+  const hint = document.getElementById('updateXmlHint');
+  input.placeholder = cfg.placeholder;
+  if (cfg.maxlength) {
+    input.setAttribute('maxlength', cfg.maxlength);
+  } else {
+    input.removeAttribute('maxlength');
+  }
+  hint.textContent = cfg.hint;
+}
+
 // Global variable to store current file path for editing
 let currentEditFilePath = null;
 
@@ -1040,6 +1084,8 @@ function createListItem(itemName, fullPath, type, panel, isDraggable) {
     pencil.addEventListener("click", e => {
       e.stopPropagation();
       const liElem = e.currentTarget.closest("li");
+      liElem.setAttribute("draggable", "false");
+      liElem.classList.remove("draggable");
       const oldPath = liElem.dataset.fullpath;
       const nameSpanElem = liElem.querySelector("span");
 
@@ -1053,11 +1099,15 @@ function createListItem(itemName, fullPath, type, panel, isDraggable) {
         if (ev.key === "Enter") {
           const newName = input.value.trim();
           if (!newName) return alert("Filename cannot be empty.");
+          liElem.setAttribute("draggable", "true");
+          liElem.classList.add("draggable");
           renameItem(oldPath, newName, panel);
         }
       });
 
       input.addEventListener("blur", () => {
+        liElem.setAttribute("draggable", "true");
+        liElem.classList.add("draggable");
         liElem.replaceChild(leftContainer, input);
       });
 
@@ -2141,6 +2191,10 @@ document.addEventListener('DOMContentLoaded', function () {
   // Add event listener for Update XML confirm button
   const updateXmlBtn = document.getElementById('updateXmlConfirmBtn');
   if (updateXmlBtn) updateXmlBtn.addEventListener('click', submitUpdateXml);
+
+  // Add event listener for Update XML field dropdown change
+  const updateXmlFieldSelect = document.getElementById('updateXmlField');
+  if (updateXmlFieldSelect) updateXmlFieldSelect.addEventListener('change', updateXmlFieldChanged);
 
 });
 
@@ -4587,6 +4641,7 @@ function openUpdateXmlModal(folderPath, folderName) {
   document.getElementById('updateXmlFolderName').textContent = folderName;
   document.getElementById('updateXmlValue').value = '';
   document.getElementById('updateXmlField').value = 'Volume';
+  updateXmlFieldChanged();
 
   const modal = new bootstrap.Modal(document.getElementById('updateXmlModal'));
   modal.show();
@@ -4597,14 +4652,10 @@ function submitUpdateXml() {
   const field = document.getElementById('updateXmlField').value;
   const value = document.getElementById('updateXmlValue').value.trim();
 
-  if (!value) {
-    showToast('Validation Error', 'Please enter a value', 'warning');
-    return;
-  }
-
-  // Validate 4-digit year for Volume
-  if (field === 'Volume' && !/^\d{4}$/.test(value)) {
-    showToast('Validation Error', 'Volume must be a 4-digit year', 'warning');
+  const cfg = updateXmlFieldConfig[field];
+  const validationError = cfg ? cfg.validate(value) : (!value ? 'Please enter a value' : null);
+  if (validationError) {
+    showToast('Validation Error', validationError, 'warning');
     return;
   }
 
