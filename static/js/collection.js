@@ -1004,6 +1004,8 @@ function renderGrid(items) {
     const template = document.getElementById('grid-item-template');
     const librarySection = document.getElementById('library-section');
 
+    // Dispose tooltips before clearing the grid to prevent memory leaks
+    disposeNameTooltips(grid);
     grid.innerHTML = '';
 
     // Show library section (empty-state and file-grid are inside it)
@@ -1435,6 +1437,9 @@ function renderGrid(items) {
 
     // Initialize lazy loading
     initLazyLoading();
+
+    // Initialize Bootstrap tooltips for truncated names
+    initNameTooltips(grid);
 }
 
 
@@ -1825,6 +1830,51 @@ function initLazyLoading() {
             img.classList.remove('lazy');
         });
     }
+}
+
+/**
+ * Initialize Bootstrap tooltips on .item-name elements that are actually truncated.
+ * Only creates a tooltip when the text overflows (scrollWidth > clientWidth).
+ * @param {HTMLElement} [container=document] - Scope to search within
+ */
+function initNameTooltips(container) {
+    const root = container || document;
+    root.querySelectorAll('.item-name').forEach(el => {
+        // Dispose any existing tooltip first
+        const existing = bootstrap.Tooltip.getInstance(el);
+        if (existing) existing.dispose();
+
+        if (el.scrollWidth > el.clientWidth) {
+            // Text is truncated — restore title if we stashed it earlier
+            if (!el.getAttribute('title') && el.dataset.originalTitle) {
+                el.setAttribute('title', el.dataset.originalTitle);
+            }
+            new bootstrap.Tooltip(el, {
+                placement: 'bottom',
+                trigger: 'hover',
+                customClass: 'item-name-tooltip'
+            });
+        } else {
+            // Not truncated — suppress native tooltip but stash for later
+            const title = el.getAttribute('title');
+            if (title) {
+                el.dataset.originalTitle = title;
+                el.removeAttribute('title');
+            }
+        }
+    });
+}
+
+/**
+ * Dispose Bootstrap tooltips on .item-name elements to prevent memory leaks.
+ * @param {HTMLElement} [container=document] - Scope to search within
+ */
+function disposeNameTooltips(container) {
+    const root = container || document;
+    root.querySelectorAll('.item-name').forEach(el => {
+        const instance = bootstrap.Tooltip.getInstance(el);
+        if (instance) instance.dispose();
+    });
 }
 
 /**
@@ -4385,7 +4435,7 @@ async function loadFavoritePublishers() {
                         </button>
                     </div>
                     <div class="dashboard-card-body">
-                        <div class="text-truncate text-dark item-name">${pub.name}</div>
+                        <div class="text-truncate text-dark item-name" title="${pub.name}">${pub.name}</div>
                         <small class="text-muted item-meta${pub.folderCount === null ? ' metadata-loading' : ''}">${pub.folderCount === null ? 'Loading...' :
                     [
                         pub.folderCount > 0 ? `${pub.folderCount} folder${pub.folderCount !== 1 ? 's' : ''}` : '',
@@ -4396,6 +4446,8 @@ async function loadFavoritePublishers() {
                 </div>
             </div>
         `}).join('');
+
+        initNameTooltips(swiper);
 
         // Load thumbnails progressively for favorites that don't have them
         const pathsNeedingThumbnails = publisherDetails
@@ -4583,12 +4635,14 @@ async function loadWantToRead() {
                         </button>
                     </div>
                     <div class="dashboard-card-body">
-                        <div class="text-truncate text-darkitem-name">${name}</div>
+                        <div class="text-truncate text-dark item-name" title="${name}">${name}</div>
                         <small class="text-muted">${item.type === 'folder' ? 'Folder' : 'Comic'}</small>
                     </div>
                 </div>
             </div>
         `}).join('');
+
+        initNameTooltips(swiper);
 
     } catch (error) {
         console.error('Error loading want to read items:', error);
@@ -4653,6 +4707,8 @@ async function loadRecentlyAddedSwiper() {
                 </div>
             </div>
         `}).join('');
+
+        initNameTooltips(swiper);
 
     } catch (error) {
         console.error('Error loading recently added files:', error);
@@ -4722,6 +4778,8 @@ async function loadContinueReadingSwiper() {
                 </div>
             </div>
         `}).join('');
+
+        initNameTooltips(swiper);
 
     } catch (error) {
         console.error('Error loading continue reading items:', error);

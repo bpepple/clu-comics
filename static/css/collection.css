@@ -179,6 +179,11 @@
     color: #333;
 }
 
+.item-name-tooltip .tooltip-inner {
+    max-width: 300px;
+    text-align: center;
+}
+
 .item-meta {
     font-size: 0.75rem;
     color: #6c757d;
