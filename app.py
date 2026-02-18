@@ -424,8 +424,8 @@ def get_series_name_from_files(mapped_path, db_series_name):
     first_file = files[0]
     # Remove extension
     name = os.path.splitext(first_file)[0]
-    # Remove year in parens: "(2024)"
-    name = re.sub(r'\s*\(\d{4}\)\s*$', '', name)
+    # Remove all parenthetical groups: "(2024)", "(1)", "(digital)", etc.
+    name = re.sub(r'\s*\([^)]*\)', '', name)
     # Remove issue number at end: " 001" or " 1"
     name = re.sub(r'\s+\d+\s*$', '', name)
 
