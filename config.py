@@ -42,6 +42,7 @@ def load_config():
         "XML_MARKDOWN": "False",
         "XML_LIST": "True",
         "MOVE_DIRECTORY": "False",
+        "CONSOLIDATE_DIRECTORIES": "False",
         "AUTO_UNPACK": "False",
         "SKIPPED_FILES": ".xml",
         "DELETED_FILES": ".nfo,.sfv,.db,.DS_Store",

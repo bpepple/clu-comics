@@ -27,6 +27,7 @@ ignored_extensions = [ext.strip() for ext in ignored_exts_config.split(",") if e
 autoconvert = config.getboolean("SETTINGS", "AUTOCONVERT", fallback=False)
 subdirectories = config.getboolean("SETTINGS", "READ_SUBDIRECTORIES", fallback=False)
 move_directories = config.getboolean("SETTINGS", "MOVE_DIRECTORY", fallback=False)
+consolidate_directories = config.getboolean("SETTINGS", "CONSOLIDATE_DIRECTORIES", fallback=False)
 auto_unpack = config.getboolean("SETTINGS", "AUTO_UNPACK", fallback=False)
 auto_cleanup = config.getboolean("SETTINGS", "AUTO_CLEANUP_ORPHAN_FILES", fallback=True)
 cleanup_interval_hours = config.getint("SETTINGS", "CLEANUP_INTERVAL_HOURS", fallback=1)
@@ -47,9 +48,10 @@ monitor_logger.info(f"3. Ignored Extensions: {ignored_extensions}")
 monitor_logger.info(f"4. Auto-Conversion Enabled: {autoconvert}")
 monitor_logger.info(f"5. Monitor Sub-Directories Enabled: {subdirectories}")
 monitor_logger.info(f"6. Move Sub-Directories Enabled: {move_directories}")
-monitor_logger.info(f"7. Auto Unpack Enabled: {auto_unpack}")
-monitor_logger.info(f"8. Auto Cleanup Orphan Files: {auto_cleanup}")
-monitor_logger.info(f"9. Cleanup Interval: {cleanup_interval_hours} hour(s)")
+monitor_logger.info(f"7. Consolidate Directories: {consolidate_directories}")
+monitor_logger.info(f"8. Auto Unpack Enabled: {auto_unpack}")
+monitor_logger.info(f"9. Auto Cleanup Orphan Files: {auto_cleanup}")
+monitor_logger.info(f"10. Cleanup Interval: {cleanup_interval_hours} hour(s)")
 
 class DownloadCompleteHandler(FileSystemEventHandler):
     def __init__(self, directory, target_directory, ignored_extensions):
@@ -63,6 +65,7 @@ class DownloadCompleteHandler(FileSystemEventHandler):
         self.autoconvert = autoconvert
         self.subdirectories = subdirectories
         self.move_directories = move_directories
+        self.consolidate_directories = consolidate_directories
         self.auto_unpack = auto_unpack
 
 
@@ -80,6 +83,7 @@ class DownloadCompleteHandler(FileSystemEventHandler):
         self.autoconvert = config.getboolean("SETTINGS", "AUTOCONVERT", fallback=False)
         self.subdirectories = config.getboolean("SETTINGS", "READ_SUBDIRECTORIES", fallback=False)
         self.move_directories = config.getboolean("SETTINGS", "MOVE_DIRECTORY", fallback=False)
+        self.consolidate_directories = config.getboolean("SETTINGS", "CONSOLIDATE_DIRECTORIES", fallback=False)
         self.auto_unpack = config.getboolean("SETTINGS", "AUTO_UNPACK", fallback=False)
         self.auto_cleanup = config.getboolean("SETTINGS", "AUTO_CLEANUP_ORPHAN_FILES", fallback=True)
         self.cleanup_interval_hours = config.getint("SETTINGS", "CLEANUP_INTERVAL_HOURS", fallback=1)
@@ -89,6 +93,7 @@ class DownloadCompleteHandler(FileSystemEventHandler):
             f"Directory: {self.directory}, Target: {self.target_directory}, "
             f"Ignored: {self.ignored_extensions}, autoconvert: {self.autoconvert}, "
             f"subdirectories: {self.subdirectories}, move_directories: {self.move_directories}, "
+            f"consolidate_directories: {self.consolidate_directories}, "
             f"auto_unpack: {self.auto_unpack}, auto_cleanup: {self.auto_cleanup}, "
             f"cleanup_interval: {self.cleanup_interval_hours}h"
         )
@@ -333,15 +338,47 @@ class DownloadCompleteHandler(FileSystemEventHandler):
             monitor_logger.warning(f"File not yet complete: {filepath}")
             return  # Exit early; do not move an incomplete file
 
-        if move_directories:
-            # Calculate the relative path from the source directory.
-            rel_path = os.path.relpath(filepath, self.directory)
-            # Build the target path preserving the sub-directory structure.
-            target_path = os.path.join(self.target_directory, rel_path)
-        else:
-            # If not moving directories, keep the original filename.
-            filename = os.path.basename(filepath)
-            target_path = os.path.join(self.target_directory, filename)
+        target_path = None
+
+        # Consolidate single-file directories into a series folder
+        if self.consolidate_directories:
+            source_dir = os.path.dirname(filepath)
+            watch_dir = os.path.abspath(self.directory)
+            abs_source_dir = os.path.abspath(source_dir)
+
+            # Only consolidate if file is in a subdirectory of the watch folder
+            if abs_source_dir != watch_dir:
+                # Check if directory has only one file
+                try:
+                    dir_files = [f for f in os.listdir(source_dir)
+                                if os.path.isfile(os.path.join(source_dir, f))]
+                except Exception:
+                    dir_files = []
+
+                if len(dir_files) == 1:
+                    # Derive series name from directory name
+                    dir_name = os.path.basename(abs_source_dir)
+                    series_name = re.sub(r'\s*\([^)]*\)', '', dir_name)  # Strip parenthetical groups
+                    series_name = re.sub(r'\s+\d+\s*$', '', series_name)  # Strip trailing issue number
+                    series_name = series_name.strip()
+
+                    if series_name:
+                        filename = os.path.basename(filepath)
+                        target_path = os.path.join(self.target_directory, series_name, filename)
+                        monitor_logger.info(
+                            f"Consolidating: '{dir_name}' -> series folder '{series_name}'"
+                        )
+
+        if target_path is None:
+            if self.move_directories:
+                # Calculate the relative path from the source directory.
+                rel_path = os.path.relpath(filepath, self.directory)
+                # Build the target path preserving the sub-directory structure.
+                target_path = os.path.join(self.target_directory, rel_path)
+            else:
+                # If not moving directories, keep the original filename.
+                filename = os.path.basename(filepath)
+                target_path = os.path.join(self.target_directory, filename)
 
         # Apply cleaning to the directory portion of target_path
         # This cleans the folder names (as per our directory cleaning rules)

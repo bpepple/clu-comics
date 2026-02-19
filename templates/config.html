@@ -178,6 +178,26 @@
                     </div>
 
                     <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" role="switch"
+                                    id="consolidateDirectories"
+                                    name="consolidateDirectories"
+                                    {% if consolidateDirectories %}checked{% endif %}>
+                                <label class="form-check-label" for="consolidateDirectories">
+                                    Consolidate Single-File Directories
+                                </label>
+                                <small class="form-text text-muted">
+                                    <br />When a downloaded directory contains only one file,
+                                    consolidate it into a series folder by stripping the issue
+                                    number from the directory name.
+                                    (e.g., <code>PEP Comics 140/</code> → <code>PEP Comics/</code>)
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
                         <div class="col-md-12">
                             <label for="ignored_extensions" class="form-label">IGNORED EXTENSIONS:</label>
                             <input type="text" name="ignored_extensions" id="ignored_extensions"
@@ -1355,6 +1375,7 @@
             readSubdirectories: document.getElementById('readSubdirectories')?.checked || false,
             autoUnpack: document.getElementById('autoUnpack')?.checked || false,
             moveDirectory: document.getElementById('moveDirectory')?.checked || false,
+            consolidateDirectories: document.getElementById('consolidateDirectories')?.checked || false,
             ignored_extensions: document.getElementById('ignored_extensions')?.value || '',
             autoCleanupOrphanFiles: document.getElementById('autoCleanupOrphanFiles')?.checked || false,
             cleanupIntervalHours: document.getElementById('cleanupIntervalHours')?.value || '24',

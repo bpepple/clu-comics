@@ -537,7 +537,7 @@ def api_browse_recursive():
         return jsonify({"error": "Invalid path"}), 400
 
     excluded_extensions = {".png", ".jpg", ".jpeg", ".gif", ".html", ".css", ".ds_store", ".json", ".db", ".xml"}
-    allowed_files = {"missing.txt", "cvinfo"}
+    allowed_files = {"missing.txt"}
 
     files = []
 

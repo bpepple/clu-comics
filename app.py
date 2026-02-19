@@ -4920,6 +4920,7 @@ def save_file_processing_config():
         config["SETTINGS"]["READ_SUBDIRECTORIES"] = str(data.get("readSubdirectories", False))
         config["SETTINGS"]["AUTO_UNPACK"] = str(data.get("autoUnpack", False))
         config["SETTINGS"]["MOVE_DIRECTORY"] = str(data.get("moveDirectory", False))
+        config["SETTINGS"]["CONSOLIDATE_DIRECTORIES"] = str(data.get("consolidateDirectories", False))
         config["SETTINGS"]["IGNORED_EXTENSIONS"] = data.get("ignored_extensions", "")
         config["SETTINGS"]["AUTO_CLEANUP_ORPHAN_FILES"] = str(data.get("autoCleanupOrphanFiles", False))
         config["SETTINGS"]["CLEANUP_INTERVAL_HOURS"] = data.get("cleanupIntervalHours", "24")
@@ -5142,6 +5143,7 @@ def config_page():
         config["SETTINGS"]["XML_MARKDOWN"] = str(request.form.get("xmlMarkdown") == "on")
         config["SETTINGS"]["XML_LIST"] = str(request.form.get("xmlList") == "on")
         config["SETTINGS"]["MOVE_DIRECTORY"] = str(request.form.get("moveDirectory") == "on")
+        config["SETTINGS"]["CONSOLIDATE_DIRECTORIES"] = str(request.form.get("consolidateDirectories") == "on")
         config["SETTINGS"]["AUTO_UNPACK"] = str(request.form.get("autoUnpack") == "on")
         config["SETTINGS"]["AUTO_CLEANUP_ORPHAN_FILES"] = str(request.form.get("autoCleanupOrphanFiles") == "on")
         config["SETTINGS"]["CLEANUP_INTERVAL_HOURS"] = request.form.get("cleanupIntervalHours", "1")
@@ -5205,6 +5207,7 @@ def config_page():
         xmlMarkdown=settings.get("XML_MARKDOWN", "False") == "True",
         xmlList=settings.get("XML_LIST", "False") == "True",
         moveDirectory=settings.get("MOVE_DIRECTORY", "False") == "True",
+        consolidateDirectories=settings.get("CONSOLIDATE_DIRECTORIES", "False") == "True",
         autoUnpack=settings.get("AUTO_UNPACK", "False") == "True",
         autoCleanupOrphanFiles=settings.get("AUTO_CLEANUP_ORPHAN_FILES", "False") == "True",
         cleanupIntervalHours=settings.get("CLEANUP_INTERVAL_HOURS", "1"),
