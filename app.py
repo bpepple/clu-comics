@@ -65,7 +65,7 @@ from database import (init_db, get_db_connection, get_recent_files, log_recent_f
                       clear_stats_cache_keys, mark_issue_read, get_issues_read, get_recent_read_issues,
                       save_issues_bulk, get_issues_for_series, update_series_sync_time, get_wanted_issues,
                       delete_issues_for_series, get_series_needing_sync, get_all_mapped_series, get_series_by_id,
-                      get_continue_reading_items)
+                      get_continue_reading_items, get_provider_credentials)
 import recommendations
 from models.stats import (get_library_stats, get_file_type_distribution, get_top_publishers,
                           get_reading_history_stats, get_largest_comics, get_top_series_by_count,
@@ -2920,9 +2920,9 @@ def inject_global_vars():
 @app.context_processor
 def inject_metron_available():
     """Inject metron_available flag for templates (e.g., to show/hide Pull List menu)."""
-    metron_username = app.config.get('METRON_USERNAME', '')
-    metron_password = app.config.get('METRON_PASSWORD', '')
-    return {'metron_available': bool(metron_username and metron_username.strip() and metron_password and metron_password.strip())}
+    # Check if Metron credentials exist in the database
+    metron_creds = get_provider_credentials('metron')
+    return {'metron_available': metron_creds is not None and metron_creds.get('username') and metron_creds.get('password')}
 
 #########################
 #     Logging Setup     #
