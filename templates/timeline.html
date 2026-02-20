@@ -117,7 +117,7 @@
     /* Issue Cards Grid */
     .cards-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
         gap: 1rem;
     }
 
@@ -127,6 +127,7 @@
         border-radius: 12px;
         overflow: hidden;
         display: flex;
+        flex-direction: column;
         transition: transform 0.2s, box-shadow 0.2s;
     }
 
@@ -137,13 +138,13 @@
     }
 
     .issue-cover {
-        width: 100px;
-        min-height: 140px;
-        flex-shrink: 0;
+        width: 100%;
+        aspect-ratio: 2 / 3;
         background: var(--bs-tertiary-bg, #e9ecef);
         display: flex;
         align-items: center;
         justify-content: center;
+        overflow: hidden;
     }
 
     .issue-cover img {
@@ -153,11 +154,10 @@
     }
 
     .issue-details {
-        padding: 1rem;
-        flex-grow: 1;
+        padding: 0.75rem;
         display: flex;
         flex-direction: column;
-        justify-content: center;
+        gap: 0.2rem;
         min-width: 0;
         /* Allows text truncation */
     }
@@ -262,12 +262,7 @@
         }
 
         .cards-grid {
-            grid-template-columns: 1fr;
-        }
-
-        .issue-cover {
-            width: 80px;
-            min-height: 110px;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
         }
     }
 </style>
