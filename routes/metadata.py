@@ -984,18 +984,10 @@ def batch_metadata():
                     cv_volume_id = cv_id_from_metron
                     app_logger.info(f"Added CV URL to existing cvinfo: cv_id={cv_id_from_metron}")
                 else:
-                    # Metron doesn't have a CV ID for this series - add placeholder
-                    cv_url_placeholder = "https://comicvine.gamespot.com/volume/4050-0/"
-                    with open(cvinfo_path, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                    # Only add if no CV URL exists
-                    if "comicvine.gamespot.com/volume/4050-" not in content:
-                        new_content = cv_url_placeholder + '\n' + content
-                        with open(cvinfo_path, 'w', encoding='utf-8') as f:
-                            f.write(new_content)
-                        cv_volume_id = 0
-                        cv_id_missing_warning = True
-                        app_logger.warning(f"Added placeholder CV URL (0) to cvinfo - series not found in ComicVine")
+                    # Metron doesn't have a CV ID for this series
+                    # cvinfo already exists with series_id, just set warning flag
+                    cv_id_missing_warning = True
+                    app_logger.warning(f"Series in Metron but no ComicVine ID available for series_id={series_id}")
 
         # Step 3: Add Metron series ID and details if not present in existing cvinfo
         if metron_api and os.path.exists(cvinfo_path) and not series_id:
