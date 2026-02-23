@@ -1,0 +1,26 @@
+name: Security Audit
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  bandit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Bandit
+        run: pip install bandit
+
+      - name: Run Bandit
+        # -r: recursive search
+        # -ll: report Medium and High severity issues only (ignores Low noise)
+        # -x: exclude your tests folder (where insecure patterns are often okay)
+        run: bandit -r . -ll -x ./tests
