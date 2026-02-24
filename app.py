@@ -382,7 +382,10 @@ def scheduled_series_sync():
                 app_logger.debug(f"Synced series {series_id}: {len(all_issues)} issues")
 
             except Exception as e:
-                app_logger.error(f"Error syncing series {series_id}: {e}")
+                if metron.is_connection_error(e):
+                    app_logger.warning(f"Metron unavailable while syncing series {series_id}: {e}")
+                else:
+                    app_logger.error(f"Error syncing series {series_id}: {e}")
                 fail_count += 1
 
         # Update last sync timestamp
@@ -400,7 +403,10 @@ def scheduled_series_sync():
         process_incoming_wanted_issues()
 
     except Exception as e:
-        app_logger.error(f"❌ Scheduled series sync failed: {e}")
+        if metron.is_connection_error(e):
+            app_logger.warning(f"Metron unavailable during scheduled sync: {e}")
+        else:
+            app_logger.error(f"Scheduled series sync failed: {e}")
 
 
 def get_series_name_from_files(mapped_path, db_series_name):
@@ -529,14 +535,17 @@ def process_incoming_wanted_issues():
     match_pattern = match_pattern.strip()
     app_logger.debug(f"Using match pattern (no year): '{match_pattern}'")
 
-    # Scan TARGET for comic files
+    # Scan TARGET for comic files (including subdirectories)
     comic_extensions = ('.cbz', '.cbr', '.zip', '.rar')
     try:
-        files = [f for f in os.listdir(target_folder)
-                 if f.lower().endswith(comic_extensions)]
-        app_logger.info(f"Found {len(files)} comic files in TARGET folder:")
-        for f in files:
-            app_logger.info(f"  FILE: {f}")
+        files = []  # List of (filename, full_path) tuples
+        for root, dirs, filenames in os.walk(target_folder):
+            for f in filenames:
+                if f.lower().endswith(comic_extensions):
+                    files.append((f, os.path.join(root, f)))
+        app_logger.info(f"Found {len(files)} comic files in TARGET folder (including subdirectories):")
+        for f, fp in files:
+            app_logger.info(f"  FILE: {fp}")
     except Exception as e:
         app_logger.error(f"Failed to scan TARGET folder: {e}")
         return
@@ -569,14 +578,13 @@ def process_incoming_wanted_issues():
 
         app_logger.info(f"Checking: '{actual_series_name}' #{issue_number} | regex: {regex.pattern}")
 
-        for filename in files[:]:  # Copy list to allow removal
+        for filename, src in files[:]:  # Copy list to allow removal
             match_result = regex.match(filename)
             app_logger.debug(f"  Testing '{filename}' -> {'MATCH' if match_result else 'no match'}")
             if match_result:
                 app_logger.info(f"✓ Match found: '{filename}' matches '{actual_series_name} #{issue_number}'")
 
                 # Found a match - move first, then rename
-                src = os.path.join(target_folder, filename)
                 dest_dir = mapped_path
 
                 # Debug: Log paths and existence checks
@@ -597,7 +605,7 @@ def process_incoming_wanted_issues():
                 try:
                     shutil.move(src, temp_dest)
                     app_logger.info(f"Moved: {filename} -> {dest_dir}")
-                    files.remove(filename)
+                    files.remove((filename, src))
                     moved_count += 1
                     affected_series.add(issue['series_id'])
 
@@ -3206,7 +3214,10 @@ def auto_fetch_metron_metadata(destination_path):
         return renamed_path if renamed_path else destination_path
 
     except Exception as e:
-        app_logger.error(f"Error in auto-fetch Metron metadata: {e}")
+        if metron.is_connection_error(e):
+            app_logger.warning(f"Metron unavailable during auto-fetch metadata: {e}")
+        else:
+            app_logger.error(f"Error in auto-fetch Metron metadata: {e}")
         return destination_path
 
 
