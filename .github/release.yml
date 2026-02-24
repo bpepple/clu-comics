@@ -1,10 +1,5 @@
 # .github/release.yml
 changelog:
-  exclude:
-    labels:
-      - ignore-for-release
-    authors:
-      - dependabot
   categories:
     - title: "🚀 New Features"
       labels:
@@ -14,10 +9,17 @@ changelog:
       labels:
         - bug
         - fix
-    - title: "Maintenance & Refactoring"
+    - title: "📝 Documentation"
+      labels:
+        - documentation
+    - title: "⚙️ Maintenance & Refactoring"
       labels:
         - chore
-        - documentation
-    - title: "Testing"
+        - internal
+    - title: "🧪 Testing"
       labels:
         - tests
+    # --- The Catch-All ---
+    - title: "📦 Other Changes"
+      labels:
+        - "*"
