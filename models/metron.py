@@ -4,34 +4,70 @@ Metron API integration for comic metadata retrieval using Mokkari library.
 from app_logging import app_logger
 from typing import Optional, Dict, Any, List
 import re
+import time
 from datetime import datetime, timedelta
 from version import __version__
 
-# Check if mokkari is available
-try:
-    from mokkari.session import Session as MokkariSession
-    MOKKARI_AVAILABLE = True
-except ImportError:
-    MOKKARI_AVAILABLE = False
+import requests.exceptions as requests_exceptions
+from mokkari.session import Session as MokkariSession
+from mokkari.exceptions import ApiError, RateLimitError
+from mokkari.schemas.collection import ScrobbleRequest
 
 # User agent for Metron API requests
 CLU_USER_AGENT = f"CLU/{__version__}"
 
+_RATE_LIMIT_MAX_RETRIES = 3
+_RATE_LIMIT_DEFAULT_WAIT = 60  # seconds, used when retry_after is 0 or unset
+_DAILY_RATE_LIMIT_THRESHOLD = 60  # seconds; retry_after above this implies daily limit exceeded
 
-def is_mokkari_available() -> bool:
-    """Check if the Mokkari library is available."""
-    return MOKKARI_AVAILABLE
+
+def _handle_rate_limit(e: "RateLimitError", attempt: int, context: str) -> bool:
+    """Sleep and signal whether to retry after a RateLimitError.
+
+    Returns True if the caller should retry, False if retries are exhausted
+    or the daily API rate limit has been exceeded.
+    """
+    wait = e.retry_after if e.retry_after else _RATE_LIMIT_DEFAULT_WAIT
+    if e.retry_after and e.retry_after > _DAILY_RATE_LIMIT_THRESHOLD:
+        app_logger.warning(
+            f"Metron daily rate limit exceeded {context}: retry_after={e.retry_after}s, giving up"
+        )
+        return False
+    if attempt < _RATE_LIMIT_MAX_RETRIES - 1:
+        app_logger.warning(
+            f"Metron rate limit exceeded {context}: retrying in {wait}s "
+            f"(attempt {attempt + 1}/{_RATE_LIMIT_MAX_RETRIES})"
+        )
+        time.sleep(wait)
+        return True
+    app_logger.warning(
+        f"Metron rate limit exceeded {context}: giving up after {_RATE_LIMIT_MAX_RETRIES} attempts"
+    )
+    return False
+
+
+def _api_call(fn, context: str, default=None):
+    """Call fn() with rate-limit retry and standard error handling."""
+    for attempt in range(_RATE_LIMIT_MAX_RETRIES):
+        try:
+            return fn()
+        except RateLimitError as e:
+            if not _handle_rate_limit(e, attempt, context):
+                return default
+        except ApiError as e:
+            app_logger.error(f"Metron API error {context}: {e}")
+            return default
+    return default
 
 
 def is_connection_error(exc: Exception) -> bool:
     """Check if an exception is a Metron connectivity/timeout error."""
-    msg = str(exc).lower()
-    return any(kw in msg for kw in (
-        'timeout', 'connection error', 'connection refused',
-        'unreachable', 'name resolution', 'nodename nor servname',
-        'temporary failure', 'gaierror', 'readtimeout',
-        'connecttimeout', 'connectionpool',
-    ))
+    if isinstance(exc, ApiError) and exc.__cause__ is not None and requests_exceptions is not None:
+        return isinstance(exc.__cause__, (
+            requests_exceptions.ConnectionError,
+            requests_exceptions.ReadTimeout,
+        ))
+    return False
 
 
 def get_api(username: str, password: str):
@@ -45,14 +81,14 @@ def get_api(username: str, password: str):
     Returns:
         Mokkari Session client or None if unavailable
     """
-    if not MOKKARI_AVAILABLE:
-        app_logger.warning("Mokkari library not available. Install with: pip install mokkari")
-        return None
     if not username or not password:
         app_logger.warning("Metron credentials not configured")
         return None
     try:
         return MokkariSession(username=username, passwd=password, user_agent=CLU_USER_AGENT)
+    except ApiError as e:
+        app_logger.error(f"Metron API error initializing session: {e}")
+        return None
     except Exception as e:
         app_logger.error(f"Failed to initialize Metron API: {e}")
         return None
@@ -126,21 +162,16 @@ def get_series_id_by_comicvine_id(api, cv_series_id: int) -> Optional[int]:
     Returns:
         Metron series ID, or None if not found
     """
-    try:
-        # Search for series by cv_id
-        params = {"cv_id": cv_series_id}
-        results = api.series_list(params)
-
+    def _call():
+        results = api.series_list({"cv_id": cv_series_id})
         if results:
             series_id = results[0].id
             app_logger.info(f"Found Metron series {series_id} for CV ID {cv_series_id}")
             return series_id
-
         app_logger.warning(f"No Metron series found for ComicVine ID {cv_series_id}")
         return None
-    except Exception as e:
-        app_logger.error(f"Error looking up Metron series by CV ID {cv_series_id}: {e}")
-        return None
+
+    return _api_call(_call, f"looking up CV ID {cv_series_id}")
 
 
 def update_cvinfo_with_metron_id(cvinfo_path: str, series_id: int) -> bool:
@@ -257,53 +288,22 @@ def get_issue_metadata(api, series_id: int, issue_number: str) -> Optional[Dict[
     Returns:
         Full issue data dict, or None if not found
     """
-    try:
-        # Search for the issue within the series
-        params = {
-            "series_id": series_id,
-            "number": issue_number
-        }
-        issues = api.issues_list(params)
-
+    def _call():
+        issues = api.issues_list({"series_id": series_id, "number": issue_number})
         if not issues:
             app_logger.warning(f"Issue {issue_number} not found in Metron series {series_id}")
             return None
 
-        # Get the full detailed metadata
         metron_issue_id = issues[0].id
         app_logger.info(f"Found Metron issue ID {metron_issue_id}, fetching full details...")
-        details = api.issue(metron_issue_id)
+        result = _to_dict(api.issue(metron_issue_id))
 
-        # Convert schema object to dict - try multiple methods
-        # Pydantic v2 uses model_dump(), v1 uses dict()
-        result = None
-        if hasattr(details, 'model_dump'):
-            app_logger.debug("Converting Metron response using model_dump()")
-            result = details.model_dump()
-        elif hasattr(details, 'dict'):
-            app_logger.debug("Converting Metron response using dict()")
-            result = details.dict()
-        elif hasattr(details, 'json'):
-            import json
-            app_logger.debug("Converting Metron response using json()")
-            result = json.loads(details.json())
-        elif hasattr(details, '__dict__'):
-            app_logger.debug("Converting Metron response using vars()")
-            result = vars(details)
-        else:
-            app_logger.debug(f"Metron response type: {type(details)}")
-            result = details
-
-        # Log key fields to verify conversion
         if result and isinstance(result, dict):
             app_logger.debug(f"Metron data keys: {list(result.keys())}")
             app_logger.debug(f"Series: {result.get('series')}, Number: {result.get('number')}")
-
         return result
 
-    except Exception as e:
-        app_logger.error(f"Error fetching issue metadata from Metron: {e}")
-        return None
+    return _api_call(_call, f"fetching issue {issue_number} in series {series_id}")
 
 
 def _get_attr(obj, key, default=None):
@@ -311,6 +311,31 @@ def _get_attr(obj, key, default=None):
     if isinstance(obj, dict):
         return obj.get(key, default)
     return getattr(obj, key, default)
+
+
+def _to_dict(obj):
+    """Convert a Pydantic model (v1 or v2) or object to a dict."""
+    if hasattr(obj, 'model_dump'):
+        app_logger.debug("Converting Metron response using model_dump()")
+        return obj.model_dump()
+    if hasattr(obj, 'dict'):
+        app_logger.debug("Converting Metron response using dict()")
+        return obj.dict()
+    if hasattr(obj, 'json'):
+        import json
+        app_logger.debug("Converting Metron response using json()")
+        return json.loads(obj.json())
+    if hasattr(obj, '__dict__'):
+        app_logger.debug("Converting Metron response using vars()")
+        return vars(obj)
+    app_logger.debug(f"Metron response type: {type(obj)}")
+    return obj
+
+
+def _extract_names(items) -> Optional[str]:
+    """Extract 'name' from a list of dicts/objects and join as comma-separated string."""
+    names = [n for item in items if (n := _get_attr(item, 'name', ''))]
+    return ', '.join(names) if names else None
 
 
 def extract_credits_by_role(credits: List, role_names: List[str]) -> str:
@@ -383,12 +408,7 @@ def map_to_comicinfo(issue_data) -> Dict[str, Any]:
 
     # Extract genres from series
     genres = _get_attr(series, 'genres', []) or []
-    genre_names = []
-    for g in genres:
-        name = _get_attr(g, 'name', '')
-        if name:
-            genre_names.append(name)
-    genre_str = ', '.join(genre_names) if genre_names else None
+    genre_str = _extract_names(genres)
 
     # Extract publisher
     publisher = _get_attr(issue_data, 'publisher', {}) or {}
@@ -405,21 +425,11 @@ def map_to_comicinfo(issue_data) -> Dict[str, Any]:
 
     # Extract characters
     characters = _get_attr(issue_data, 'characters', []) or []
-    char_names = []
-    for c in characters:
-        name = _get_attr(c, 'name', '')
-        if name:
-            char_names.append(name)
-    characters_str = ', '.join(char_names) if char_names else None
+    characters_str = _extract_names(characters)
 
     # Extract teams
     teams = _get_attr(issue_data, 'teams', []) or []
-    team_names = []
-    for t in teams:
-        name = _get_attr(t, 'name', '')
-        if name:
-            team_names.append(name)
-    teams_str = ', '.join(team_names) if team_names else None
+    teams_str = _extract_names(teams)
 
     # Get title from story_titles/name array (first element)
     # Mokkari model_dump() renames API "name" -> "story_titles" and "title" -> "collection_title"
@@ -601,44 +611,25 @@ def get_releases(api, date_after: str, date_before: Optional[str] = None) -> Lis
     Returns:
         List of issue objects
     """
-    try:
-        if not api:
-            return []
-
-        params = {
-            "store_date_range_after": date_after
-        }
-        if date_before:
-            params["store_date_range_before"] = date_before
-            
-        app_logger.info(f"Fetching releases with params: {params}")
-        
-        # Note: Using issues_list matching existing patterns in this file
-        results = api.issues_list(params)
-        return results
-        
-    except Exception as e:
-        app_logger.error(f"Error getting releases: {e}")
+    if not api:
         return []
+
+    params = {"store_date_range_after": date_after}
+    if date_before:
+        params["store_date_range_before"] = date_before
+    app_logger.info(f"Fetching releases with params: {params}")
+    return _api_call(lambda: api.issues_list(params), "getting releases", default=[]) or []
 
 def get_all_issues_for_series(api, series_id):
     """
     Retrieves all issues associated with a specific series ID.
     """
-    try:
-        # Pass the series ID as a filter in the params dictionary
-        params = {
-            "series_id": series_id
-        }
-
+    def _call():
+        params = {"series_id": series_id}
         app_logger.info(f"Fetching issues for series_id: {series_id} with params: {params}")
-        series_issues = api.issues_list(params)
+        return api.issues_list(params)
 
-        return series_issues
-
-    except Exception as e:
-        app_logger.error(f"Error retrieving issues for series {series_id}: {e}")
-        return []
+    return _api_call(_call, f"retrieving issues for series {series_id}", default=[]) or []
 
 def search_series_by_name(api, series_name: str, year: Optional[int] = None) -> Optional[Dict[str, Any]]:
     """
@@ -652,10 +643,10 @@ def search_series_by_name(api, series_name: str, year: Optional[int] = None) -> 
     Returns:
         Dict with id, name, cv_id, publisher_name, year_began, or None if not found
     """
-    try:
-        if not api or not series_name:
-            return None
+    if not api or not series_name:
+        return None
 
+    def _call():
         app_logger.info(f"Searching Metron for series: '{series_name}' (year: {year})")
         results = api.series_list({'name': series_name})
 
@@ -663,27 +654,18 @@ def search_series_by_name(api, series_name: str, year: Optional[int] = None) -> 
             app_logger.info(f"No Metron series found for '{series_name}'")
             return None
 
-        # Convert results to list for sorting
         series_list = list(results)
         app_logger.info(f"Found {len(series_list)} Metron series matches")
 
-        # If year provided, sort by closest year_began match
         if year and len(series_list) > 1:
             def year_distance(s):
                 s_year = getattr(s, 'year_began', None)
-                if s_year is None:
-                    return 9999
-                return abs(s_year - year)
+                return abs(s_year - year) if s_year is not None else 9999
             series_list = sorted(series_list, key=year_distance)
 
-        # Take best match
         series = series_list[0]
-
-        # Extract publisher info
         publisher = getattr(series, 'publisher', None)
-        publisher_name = None
-        if publisher:
-            publisher_name = getattr(publisher, 'name', None)
+        publisher_name = getattr(publisher, 'name', None) if publisher else None
 
         result = {
             'id': getattr(series, 'id', None),
@@ -692,13 +674,10 @@ def search_series_by_name(api, series_name: str, year: Optional[int] = None) -> 
             'publisher_name': publisher_name,
             'year_began': getattr(series, 'year_began', None)
         }
-
         app_logger.info(f"Best Metron match: {result['name']} ({result['year_began']}) - cv_id: {result['cv_id']}")
         return result
 
-    except Exception as e:
-        app_logger.error(f"Error searching Metron for series '{series_name}': {e}")
-        return None
+    return _api_call(_call, f"searching for series '{series_name}'")
 
 
 def get_series_details(api, series_id: int) -> Optional[Dict[str, Any]]:
@@ -712,31 +691,25 @@ def get_series_details(api, series_id: int) -> Optional[Dict[str, Any]]:
     Returns:
         Dict with id, cv_id, publisher_name, year_began, or None if not found
     """
-    try:
-        if not api or not series_id:
-            return None
+    if not api or not series_id:
+        return None
 
-        # Get series details
+    def _call():
         series = api.series(series_id)
-        if series:
-            publisher = getattr(series, 'publisher', None)
-            publisher_name = None
-            if publisher:
-                publisher_name = getattr(publisher, 'name', None)
+        if not series:
+            return None
+        publisher = getattr(series, 'publisher', None)
+        publisher_name = getattr(publisher, 'name', None) if publisher else None
+        result = {
+            'id': series_id,
+            'cv_id': getattr(series, 'cv_id', None),
+            'publisher_name': publisher_name,
+            'year_began': getattr(series, 'year_began', None)
+        }
+        app_logger.info(f"Metron series details: cv_id={result['cv_id']}, publisher={result['publisher_name']}, year={result['year_began']}")
+        return result
 
-            result = {
-                'id': series_id,
-                'cv_id': getattr(series, 'cv_id', None),
-                'publisher_name': publisher_name,
-                'year_began': getattr(series, 'year_began', None)
-            }
-            app_logger.info(f"Metron series details: cv_id={result['cv_id']}, publisher={result['publisher_name']}, year={result['year_began']}")
-            return result
-
-        return None
-    except Exception as e:
-        app_logger.error(f"Error getting details for series {series_id}: {e}")
-        return None
+    return _api_call(_call, f"getting details for series {series_id}")
 
 
 def get_series_cv_id(api, series_id: int) -> Optional[int]:
@@ -839,7 +812,7 @@ def create_cvinfo_file(cvinfo_path: str, cv_id: Optional[int], series_id: int,
         return False
 
 
-def scrobble_issue(api, metron_issue_id: int, date_read: str = None) -> bool:
+def scrobble_issue(api, metron_issue_id: int, date_read: str = "") -> bool:
     """
     Scrobble (mark as read) an issue on Metron.
 
@@ -851,19 +824,15 @@ def scrobble_issue(api, metron_issue_id: int, date_read: str = None) -> bool:
     Returns:
         True if scrobble succeeded, False otherwise
     """
-    try:
-        from mokkari.schemas.collection import ScrobbleRequest
-    except ImportError:
-        app_logger.warning("ScrobbleRequest not available in installed mokkari version")
-        return False
+    # TODO: Fix date_read should be a datetime not a str, Metron's API is fixing this error
+    scrobble_data = ScrobbleRequest(issue_id=metron_issue_id, date_read=date_read, rating=None)
 
-    try:
-        request = ScrobbleRequest(issue_id=metron_issue_id, date_read=date_read)
-        response = api.collection_scrobble(request)
-        return response is not None
-    except Exception as e:
-        app_logger.error(f"Failed to scrobble issue {metron_issue_id}: {e}")
-        return False
+    result = _api_call(
+        lambda: api.collection_scrobble(scrobble_data) is not None,
+        f"scrobbling issue {metron_issue_id}",
+        default=False
+    )
+    return bool(result)
 
 
 def resolve_metron_issue_id(api, comic_path: str, issue_number: str = None) -> Optional[int]:
