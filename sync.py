@@ -68,7 +68,7 @@ def sync_series_from_api(api, series_id: int) -> dict:
             }
 
         # Fetch all issues
-        all_issues_result = metron.get_all_issues_for_series(api, series_id)
+        all_issues_result = api.get_all_issues_for_series(series_id)
         all_issues = list(all_issues_result) if all_issues_result else []
 
         # Delete existing cached issues and save new ones

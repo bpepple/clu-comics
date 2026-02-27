@@ -1,11 +1,12 @@
 """
 Metron Provider Adapter.
 
-Wraps the existing Metron/Mokkari implementation to conform to the BaseProvider interface.
+Wraps MetronClient to conform to the BaseProvider interface.
 """
 from typing import Optional, List, Dict, Any
 
 from app_logging import app_logger
+from models import metron
 from .base import BaseProvider, ProviderType, ProviderCredentials, SearchResult, IssueResult
 from . import register_provider
 
@@ -25,34 +26,23 @@ class MetronProvider(BaseProvider):
         self._api = None
 
     def _get_api(self):
-        """Get or create the Mokkari API client."""
+        """Get or create the MetronClient."""
         if self._api is not None:
             return self._api
 
         if not self.credentials or not self.credentials.username or not self.credentials.password:
             return None
 
-        try:
-            from models import metron as metron_module
-            self._api = metron_module.get_api(
-                self.credentials.username,
-                self.credentials.password
-            )
-            return self._api
-        except Exception as e:
-            app_logger.error(f"Failed to initialize Metron API: {e}")
-            return None
+        self._api = metron.get_api(self.credentials.username, self.credentials.password)
+        return self._api
 
     def test_connection(self) -> bool:
         """Test connection to Metron API."""
         try:
-            api = self._get_api()
-            if not api:
+            client = self._get_api()
+            if not client:
                 return False
-
-            # Try to fetch a simple resource to verify credentials
-            # Use publisher list as a lightweight test
-            result = api.publishers_list({"name": "Marvel"})
+            result = client.publishers_list({"name": "Marvel"})
             return result is not None
         except Exception as e:
             app_logger.error(f"Metron connection test failed: {e}")
@@ -61,18 +51,14 @@ class MetronProvider(BaseProvider):
     def search_series(self, query: str, year: Optional[int] = None) -> List[SearchResult]:
         """Search for series on Metron."""
         try:
-            api = self._get_api()
-            if not api:
+            client = self._get_api()
+            if not client:
                 return []
 
-            from models import metron as metron_module
-            result = metron_module.search_series_by_name(api, query, year)
-
+            result = client.search_series_by_name(query, year)
             if not result:
                 return []
 
-            # search_series_by_name returns a single best match dict
-            # Convert to SearchResult
             return [SearchResult(
                 provider=self.provider_type,
                 id=str(result.get('id', '')),
@@ -80,8 +66,8 @@ class MetronProvider(BaseProvider):
                 year=result.get('year_began'),
                 publisher=result.get('publisher_name'),
                 issue_count=result.get('issue_count'),
-                cover_url=None,  # Metron doesn't return cover in search
-                description=None
+                cover_url=None,
+                description=None,
             )]
         except Exception as e:
             app_logger.error(f"Metron search_series failed: {e}")
@@ -90,13 +76,11 @@ class MetronProvider(BaseProvider):
     def get_series(self, series_id: str) -> Optional[SearchResult]:
         """Get series details by Metron series ID."""
         try:
-            api = self._get_api()
-            if not api:
+            client = self._get_api()
+            if not client:
                 return None
 
-            from models import metron as metron_module
-            details = metron_module.get_series_details(api, int(series_id))
-
+            details = client.get_series_details(int(series_id))
             if not details:
                 return None
 
@@ -108,7 +92,7 @@ class MetronProvider(BaseProvider):
                 publisher=details.get('publisher_name'),
                 issue_count=details.get('issue_count'),
                 cover_url=None,
-                description=details.get('desc')
+                description=details.get('desc'),
             )
         except Exception as e:
             app_logger.error(f"Metron get_series failed: {e}")
@@ -117,19 +101,16 @@ class MetronProvider(BaseProvider):
     def get_issues(self, series_id: str) -> List[IssueResult]:
         """Get all issues for a Metron series."""
         try:
-            api = self._get_api()
-            if not api:
+            client = self._get_api()
+            if not client:
                 return []
 
-            from models import metron as metron_module
-            issues = metron_module.get_all_issues_for_series(api, int(series_id))
-
+            issues = client.get_all_issues_for_series(int(series_id))
             if not issues:
                 return []
 
             results = []
             for issue in issues:
-                # Handle both dict and object types
                 if hasattr(issue, '__dict__'):
                     issue_id = getattr(issue, 'id', None)
                     issue_number = getattr(issue, 'number', None)
@@ -145,7 +126,6 @@ class MetronProvider(BaseProvider):
                     store_date = issue.get('store_date')
                     image = issue.get('image')
 
-                # Handle name as array (Metron returns ["Title"]) or string
                 if isinstance(issue_name, list):
                     issue_title = str(issue_name[0]) if issue_name else None
                 else:
@@ -160,7 +140,7 @@ class MetronProvider(BaseProvider):
                     cover_date=str(cover_date) if cover_date else None,
                     store_date=str(store_date) if store_date else None,
                     cover_url=str(image) if image else None,
-                    summary=None
+                    summary=None,
                 ))
 
             return results
@@ -171,12 +151,11 @@ class MetronProvider(BaseProvider):
     def get_issue(self, issue_id: str) -> Optional[IssueResult]:
         """Get issue details by Metron issue ID."""
         try:
-            api = self._get_api()
-            if not api:
+            client = self._get_api()
+            if not client:
                 return None
 
-            # Fetch issue directly
-            issue = api.issue(int(issue_id))
+            issue = client.issue(int(issue_id))
             if not issue:
                 return None
 
@@ -191,26 +170,19 @@ class MetronProvider(BaseProvider):
                 cover_date=str(issue.cover_date) if issue.cover_date else None,
                 store_date=str(issue.store_date) if issue.store_date else None,
                 cover_url=str(issue.image) if issue.image else None,
-                summary=issue.desc if hasattr(issue, 'desc') else None
+                summary=issue.desc if hasattr(issue, 'desc') else None,
             )
         except Exception as e:
             app_logger.error(f"Metron get_issue failed: {e}")
             return None
 
     def get_issue_metadata(self, series_id: str, issue_number: str) -> Optional[Dict[str, Any]]:
-        """
-        Get full issue metadata for a specific issue in a series.
-
-        This is a convenience method that returns the raw Metron issue data
-        suitable for conversion to ComicInfo.xml.
-        """
+        """Get full issue metadata suitable for conversion to ComicInfo.xml."""
         try:
-            api = self._get_api()
-            if not api:
+            client = self._get_api()
+            if not client:
                 return None
-
-            from models import metron as metron_module
-            return metron_module.get_issue_metadata(api, int(series_id), issue_number)
+            return client.get_issue_metadata(int(series_id), issue_number)
         except Exception as e:
             app_logger.error(f"Metron get_issue_metadata failed: {e}")
             return None
@@ -218,13 +190,11 @@ class MetronProvider(BaseProvider):
     def to_comicinfo(self, issue: IssueResult, series: Optional[SearchResult] = None) -> Dict[str, Any]:
         """Convert Metron issue data to ComicInfo.xml fields."""
         try:
-            # For full metadata, we need to fetch the complete issue data
-            api = self._get_api()
-            if api and issue.id:
-                full_issue = api.issue(int(issue.id))
+            client = self._get_api()
+            if client and issue.id:
+                full_issue = client.issue(int(issue.id))
                 if full_issue:
-                    from models import metron as metron_module
-                    return metron_module.map_to_comicinfo(full_issue)
+                    return metron.map_to_comicinfo(full_issue)
 
             # Fallback: build from IssueResult
             comicinfo = {
@@ -234,7 +204,6 @@ class MetronProvider(BaseProvider):
                 'Year': int(issue.cover_date[:4]) if issue.cover_date and len(issue.cover_date) >= 4 else None,
                 'Notes': f'Metadata from Metron. Issue ID: {issue.id}',
             }
-
             if series:
                 comicinfo['Publisher'] = series.publisher
                 comicinfo['Volume'] = series.year

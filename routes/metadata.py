@@ -913,7 +913,7 @@ def batch_metadata():
             if metron_api:
                 app_logger.info("Trying Metron first for cvinfo creation...")
                 try:
-                    metron_series = metron.search_series_by_name(metron_api, series_name, extracted_year)
+                    metron_series = metron_api.search_series_by_name(series_name, extracted_year)
                     if metron_series:
                         # Create cvinfo with all Metron data
                         metron.create_cvinfo_file(
@@ -987,7 +987,7 @@ def batch_metadata():
 
             # If cvinfo has series_id but no CV URL, look up cv_id from Metron and add it
             if not cv_volume_id and series_id and metron_api:
-                cv_id_from_metron = metron.get_series_cv_id(metron_api, series_id)
+                cv_id_from_metron = metron_api.get_series_cv_id(series_id)
                 if cv_id_from_metron:
                     metron.add_cvinfo_url(cvinfo_path, cv_id_from_metron)
                     cv_volume_id = cv_id_from_metron
@@ -1002,10 +1002,10 @@ def batch_metadata():
         if metron_api and os.path.exists(cvinfo_path) and not series_id:
             cv_id = metron.parse_cvinfo_for_comicvine_id(cvinfo_path)
             if cv_id:
-                series_id = metron.get_series_id_by_comicvine_id(metron_api, cv_id)
+                series_id = metron_api.get_series_id_by_comicvine_id(cv_id)
                 if series_id:
                     # Get full series details from Metron
-                    series_details = metron.get_series_details(metron_api, series_id)
+                    series_details = metron_api.get_series_details(series_id)
                     if series_details:
                         # Update cvinfo with series_id
                         metron.update_cvinfo_with_metron_id(cvinfo_path, series_id)
@@ -1145,7 +1145,7 @@ def batch_metadata():
                         if not (metron_available and metron_api and series_id):
                             return False
                         try:
-                            issue_data = metron.get_issue_metadata(metron_api, series_id, issue_number)
+                            issue_data = metron_api.get_issue_metadata(series_id, issue_number)
                             if issue_data:
                                 metadata = metron.map_to_comicinfo(issue_data)
                                 source = 'Metron'
@@ -2505,7 +2505,7 @@ def _try_metron_single(cvinfo_path, issue_number):
         if not metron_api:
             return None, None
 
-        issue_data = metron.get_issue_metadata(metron_api, series_id, issue_number)
+        issue_data = metron_api.get_issue_metadata(series_id, issue_number)
         if not issue_data:
             return None, None
 

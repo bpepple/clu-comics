@@ -360,7 +360,7 @@ def scheduled_series_sync():
                     continue
 
                 # Fetch all issues
-                all_issues_result = metron.get_all_issues_for_series(api, series_id)
+                all_issues_result = api.get_all_issues_for_series(series_id)
                 all_issues = list(all_issues_result) if all_issues_result else []
 
                 # Save issues (INSERT OR REPLACE handles updates)
@@ -2736,10 +2736,7 @@ def auto_fetch_metron_metadata(destination_path):
         The final file path (renamed path if file was renamed, original path otherwise)
     """
     try:
-        from models.metron import (
-            get_api, get_series_id,
-            get_issue_metadata, map_to_comicinfo
-        )
+        from models.metron import get_api, map_to_comicinfo
         from models.providers.base import extract_issue_number
         from models.comicvine import generate_comicinfo_xml, add_comicinfo_to_archive
         from comicinfo import read_comicinfo_from_zip
@@ -2786,7 +2783,7 @@ def auto_fetch_metron_metadata(destination_path):
             return destination_path
 
         # Get Metron series ID (from cvinfo or lookup by CV ID)
-        series_id = get_series_id(cvinfo_path, api)
+        series_id = api.get_series_id(cvinfo_path)
         if not series_id:
             app_logger.debug("Could not determine Metron series ID")
             return destination_path
@@ -2823,7 +2820,7 @@ def auto_fetch_metron_metadata(destination_path):
                 continue
 
             # Fetch metadata from Metron
-            issue_data = get_issue_metadata(api, series_id, issue_number)
+            issue_data = api.get_issue_metadata(series_id, issue_number)
             if not issue_data:
                 continue
 
@@ -2832,8 +2829,8 @@ def auto_fetch_metron_metadata(destination_path):
                 from models.metron import write_cvinfo_fields, _get_attr
                 publisher = _get_attr(issue_data, 'publisher', {}) or {}
                 publisher_name = _get_attr(publisher, 'name', None)
-                series = _get_attr(issue_data, 'series', {}) or {}
-                year_began = _get_attr(series, 'year_began', None)
+                series_data = _get_attr(issue_data, 'series', {}) or {}
+                year_began = _get_attr(series_data, 'year_began', None)
                 if publisher_name or year_began:
                     write_cvinfo_fields(cvinfo_path, publisher_name, year_began)
                 cvinfo_fields_saved = True
@@ -3279,14 +3276,13 @@ def api_mark_comic_read():
         metron_username = app.config.get("METRON_USERNAME", "").strip()
         metron_password = app.config.get("METRON_PASSWORD", "").strip()
         if metron_username and metron_password:
-            from models import metron as metron_module
-            api = metron_module.get_api(metron_username, metron_password)
+            api = metron.get_api(metron_username, metron_password)
             if api:
-                metron_issue_id = metron_module.resolve_metron_issue_id(
-                    api, comic_path, comic_info.get('Number') if comic_info else None
+                metron_issue_id = api.resolve_metron_issue_id(
+                    comic_path, comic_info.get('Number') if comic_info else None
                 )
                 if metron_issue_id:
-                    metron_module.scrobble_issue(api, metron_issue_id, read_at)
+                    api.scrobble_issue(metron_issue_id, read_at)
                     app_logger.info(f"Scrobbled to Metron: issue {metron_issue_id}")
     except Exception as e:
         app_logger.warning(f"Metron scrobble failed (non-blocking): {e}")

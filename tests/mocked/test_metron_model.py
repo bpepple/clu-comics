@@ -7,12 +7,13 @@ from tests.mocked.conftest import make_mock_series, make_mock_issue
 class TestGetApi:
 
     @patch("models.metron.MokkariSession")
-    def test_returns_session(self, mock_session_class):
-        from models.metron import get_api
+    def test_returns_client(self, mock_session_class):
+        from models.metron import get_api, MetronClient
 
         mock_session_class.return_value = MagicMock()
-        api = get_api("user", "pass")
-        assert api is not None
+        client = get_api("user", "pass")
+        assert client is not None
+        assert isinstance(client, MetronClient)
         mock_session_class.assert_called_once()
 
     def test_empty_credentials(self):
@@ -75,126 +76,141 @@ class TestParseCvinfo:
 
 class TestGetSeriesIdByComicvineId:
 
-    def test_found(self):
-        from models.metron import get_series_id_by_comicvine_id
-
-        mock_api = MagicMock()
+    def test_found(self, mock_client):
+        client, mock_session = mock_client
         mock_series = make_mock_series(id=42)
-        mock_api.series_list.return_value = [mock_series]
+        mock_session.series_list.return_value = [mock_series]
 
-        assert get_series_id_by_comicvine_id(mock_api, 12345) == 42
+        assert client.get_series_id_by_comicvine_id(12345) == 42
 
-    def test_not_found(self):
-        from models.metron import get_series_id_by_comicvine_id
+    def test_not_found(self, mock_client):
+        client, mock_session = mock_client
+        mock_session.series_list.return_value = []
 
-        mock_api = MagicMock()
-        mock_api.series_list.return_value = []
-
-        assert get_series_id_by_comicvine_id(mock_api, 99999) is None
+        assert client.get_series_id_by_comicvine_id(99999) is None
 
 
 class TestSearchSeriesByName:
 
-    def test_returns_best_match(self):
-        from models.metron import search_series_by_name
-
-        mock_api = MagicMock()
+    def test_returns_best_match(self, mock_client):
+        client, mock_session = mock_client
         s = make_mock_series(id=100, name="Batman", year_began=2016)
-        mock_api.series_list.return_value = [s]
+        mock_session.series_list.return_value = [s]
 
-        result = search_series_by_name(mock_api, "Batman")
+        result = client.search_series_by_name("Batman")
         assert result is not None
         assert result["id"] == 100
         assert result["name"] == "Batman"
 
-    def test_year_ranking(self):
-        from models.metron import search_series_by_name
-
-        mock_api = MagicMock()
+    def test_year_ranking(self, mock_client):
+        client, mock_session = mock_client
         s1 = make_mock_series(id=1, name="Batman", year_began=1940)
         s2 = make_mock_series(id=2, name="Batman", year_began=2016)
-        mock_api.series_list.return_value = [s1, s2]
+        mock_session.series_list.return_value = [s1, s2]
 
-        result = search_series_by_name(mock_api, "Batman", year=2016)
+        result = client.search_series_by_name("Batman", year=2016)
         assert result["id"] == 2  # Closer to 2016
 
-    def test_no_results(self):
-        from models.metron import search_series_by_name
+    def test_no_results(self, mock_client):
+        client, mock_session = mock_client
+        mock_session.series_list.return_value = []
 
-        mock_api = MagicMock()
-        mock_api.series_list.return_value = []
+        assert client.search_series_by_name("Nonexistent") is None
 
-        assert search_series_by_name(mock_api, "Nonexistent") is None
-
-    def test_no_api(self):
-        from models.metron import search_series_by_name
-        assert search_series_by_name(None, "Batman") is None
+    def test_no_series_name(self, mock_client):
+        client, mock_session = mock_client
+        assert client.search_series_by_name("") is None
 
 
 class TestGetSeriesDetails:
 
-    def test_returns_details(self):
-        from models.metron import get_series_details
+    def test_returns_details(self, mock_client):
+        client, mock_session = mock_client
+        mock_session.series.return_value = make_mock_series(id=100, cv_id=12345)
 
-        mock_api = MagicMock()
-        mock_api.series.return_value = make_mock_series(id=100, cv_id=12345)
-
-        result = get_series_details(mock_api, 100)
+        result = client.get_series_details(100)
         assert result["id"] == 100
         assert result["cv_id"] == 12345
 
-    def test_not_found(self):
-        from models.metron import get_series_details
+    def test_not_found(self, mock_client):
+        client, mock_session = mock_client
+        mock_session.series.return_value = None
 
-        mock_api = MagicMock()
-        mock_api.series.return_value = None
-
-        assert get_series_details(mock_api, 9999) is None
+        assert client.get_series_details(9999) is None
 
 
 class TestGetIssueMetadata:
 
-    def test_double_fetch_pattern(self):
-        from models.metron import get_issue_metadata
-
-        mock_api = MagicMock()
-        mock_issue_list = [MagicMock(id=500)]
-        mock_api.issues_list.return_value = mock_issue_list
+    def test_double_fetch_pattern(self, mock_client):
+        client, mock_session = mock_client
+        mock_session.issues_list.return_value = [MagicMock(id=500)]
         full_issue = make_mock_issue(id=500)
-        mock_api.issue.return_value = full_issue
+        mock_session.issue.return_value = full_issue
 
-        result = get_issue_metadata(mock_api, 100, "1")
+        result = client.get_issue_metadata(100, "1")
         assert result is not None
-        mock_api.issues_list.assert_called_once()
-        mock_api.issue.assert_called_once_with(500)
+        mock_session.issues_list.assert_called_once()
+        mock_session.issue.assert_called_once_with(500)
 
-    def test_issue_not_found(self):
-        from models.metron import get_issue_metadata
+    def test_issue_not_found(self, mock_client):
+        client, mock_session = mock_client
+        mock_session.issues_list.return_value = []
 
-        mock_api = MagicMock()
-        mock_api.issues_list.return_value = []
-
-        assert get_issue_metadata(mock_api, 100, "999") is None
+        assert client.get_issue_metadata(100, "999") is None
 
 
 class TestGetAllIssuesForSeries:
 
-    def test_returns_issues(self):
-        from models.metron import get_all_issues_for_series
+    def test_returns_issues(self, mock_client):
+        client, mock_session = mock_client
+        mock_session.issues_list.return_value = [MagicMock(id=1), MagicMock(id=2)]
 
-        mock_api = MagicMock()
-        mock_api.issues_list.return_value = [MagicMock(id=1), MagicMock(id=2)]
-
-        result = get_all_issues_for_series(mock_api, 100)
+        result = client.get_all_issues_for_series(100)
         assert len(result) == 2
 
-    def test_empty_series(self):
-        from models.metron import get_all_issues_for_series
+    def test_empty_series(self, mock_client):
+        client, mock_session = mock_client
+        mock_session.issues_list.return_value = []
 
-        mock_api = MagicMock()
-        mock_api.issues_list.return_value = []
+        assert client.get_all_issues_for_series(100) == []
 
-        assert get_all_issues_for_series(mock_api, 100) == []
+
+class TestGetReleases:
+
+    def test_fetches_releases(self, mock_client):
+        client, mock_session = mock_client
+        mock_session.issues_list.return_value = [MagicMock(), MagicMock()]
+
+        result = client.get_releases("2024-01-01", "2024-01-07")
+        assert len(result) == 2
+
+    def test_no_date_before(self, mock_client):
+        client, mock_session = mock_client
+        mock_session.issues_list.return_value = []
+
+        result = client.get_releases("2024-01-01")
+        assert result == []
+
+
+class TestSessionDelegation:
+    """__getattr__ should forward unknown calls to the underlying session."""
+
+    def test_direct_session_method(self, mock_client):
+        client, mock_session = mock_client
+        mock_session.publishers_list.return_value = [MagicMock()]
+
+        result = client.publishers_list({"name": "Marvel"})
+        mock_session.publishers_list.assert_called_once_with({"name": "Marvel"})
+        assert len(result) == 1
+
+    def test_issue_lookup(self, mock_client):
+        client, mock_session = mock_client
+        mock_issue = make_mock_issue(id=500)
+        mock_session.issue.return_value = mock_issue
+
+        result = client.issue(500)
+        mock_session.issue.assert_called_once_with(500)
+        assert result is mock_issue
 
 
 class TestMapToComicinfo:
@@ -324,19 +340,3 @@ class TestUpdateCvinfoWithMetronId:
         content = cvinfo.read_text()
         assert "series_id: 100" in content
         assert "series_id: 50" not in content
-
-
-class TestGetReleases:
-
-    def test_fetches_releases(self):
-        from models.metron import get_releases
-
-        mock_api = MagicMock()
-        mock_api.issues_list.return_value = [MagicMock(), MagicMock()]
-
-        result = get_releases(mock_api, "2024-01-01", "2024-01-07")
-        assert len(result) == 2
-
-    def test_no_api(self):
-        from models.metron import get_releases
-        assert get_releases(None, "2024-01-01") == []

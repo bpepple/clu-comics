@@ -87,8 +87,7 @@ def releases():
 
         future_start = next_week_end
 
-        releases_list = metron.get_releases(api,
-                                          date_after=future_start.strftime(fmt),
+        releases_list = api.get_releases(date_after=future_start.strftime(fmt),
                                           date_before=None)
 
         display_date_range = f"Future (After {future_start.strftime(fmt)})"
@@ -98,8 +97,7 @@ def releases():
         start_str = start_date.strftime(fmt)
         end_str = end_date.strftime(fmt)
 
-        releases_list = metron.get_releases(api,
-                                          date_after=start_str,
+        releases_list = api.get_releases(date_after=start_str,
                                           date_before=end_str)
 
         display_date_range = f"Week of {start_str} to {end_str}"
@@ -389,7 +387,7 @@ def series_view(slug):
             app_logger.info(f"Got series_info: {series_info.name if series_info else 'None'}")
 
             app_logger.info(f"Fetching all issues for series_id: {series_id}")
-            all_issues_result = metron.get_all_issues_for_series(api, series_id)
+            all_issues_result = api.get_all_issues_for_series(series_id)
             all_issues = list(all_issues_result) if all_issues_result else []
             app_logger.info(f"Got {len(all_issues)} issues")
 
@@ -752,7 +750,7 @@ def check_series_collection(series_id):
                 return jsonify({'error': 'Metron API not configured and no cached data'}), 500
 
             series_info = api.series(series_id)
-            all_issues_result = metron.get_all_issues_for_series(api, series_id)
+            all_issues_result = api.get_all_issues_for_series(series_id)
             all_issues = list(all_issues_result) if all_issues_result else []
 
         issue_status = match_issues_to_collection(mapped_path, all_issues, series_info, use_cache=not refresh)
@@ -900,7 +898,7 @@ def sync_series(series_id):
             update_series_desc(series_id, api_desc)
             app_logger.info(f"Updated description for series {series_id}")
 
-        all_issues_result = metron.get_all_issues_for_series(api, series_id)
+        all_issues_result = api.get_all_issues_for_series(series_id)
         all_issues = list(all_issues_result) if all_issues_result else []
 
         delete_issues_for_series(series_id)
@@ -961,7 +959,7 @@ def sync_all_series():
                     results.append({'series_id': series_id, 'success': False, 'error': 'Not found'})
                     continue
 
-                all_issues_result = metron.get_all_issues_for_series(api, series_id)
+                all_issues_result = api.get_all_issues_for_series(series_id)
                 all_issues = list(all_issues_result) if all_issues_result else []
 
                 delete_issues_for_series(series_id)

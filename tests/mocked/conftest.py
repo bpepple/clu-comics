@@ -17,6 +17,17 @@ def metron_creds():
 
 
 @pytest.fixture
+def mock_client():
+    """MetronClient with its underlying Mokkari session mocked out."""
+    with patch("models.metron.MokkariSession") as mock_session_class:
+        mock_session = MagicMock()
+        mock_session_class.return_value = mock_session
+        from models.metron import MetronClient
+        client = MetronClient("testuser", "testpass")
+        yield client, mock_session
+
+
+@pytest.fixture
 def comicvine_creds():
     return ProviderCredentials(api_key="fake-cv-api-key")
 

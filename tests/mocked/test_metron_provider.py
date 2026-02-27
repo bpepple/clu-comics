@@ -27,12 +27,12 @@ class TestMetronProviderInit:
     def test_get_api_with_credentials(self, mock_get_api, metron_creds):
         from models.providers.metron_provider import MetronProvider
 
-        mock_api = MagicMock()
-        mock_get_api.return_value = mock_api
+        mock_client = MagicMock()
+        mock_get_api.return_value = mock_client
 
         p = MetronProvider(credentials=metron_creds)
         api = p._get_api()
-        assert api is mock_api
+        assert api is mock_client
         mock_get_api.assert_called_once_with("testuser", "testpass")
 
 
@@ -42,9 +42,9 @@ class TestMetronProviderTestConnection:
     def test_successful_connection(self, mock_get_api, metron_creds):
         from models.providers.metron_provider import MetronProvider
 
-        mock_api = MagicMock()
-        mock_api.publishers_list.return_value = [MagicMock()]
-        mock_get_api.return_value = mock_api
+        mock_client = MagicMock()
+        mock_client.publishers_list.return_value = [MagicMock()]
+        mock_get_api.return_value = mock_client
 
         p = MetronProvider(credentials=metron_creds)
         assert p.test_connection() is True
@@ -66,15 +66,15 @@ class TestMetronProviderTestConnection:
 class TestMetronProviderSearchSeries:
 
     @patch("models.metron.get_api")
-    @patch("models.metron.search_series_by_name")
-    def test_search_returns_results(self, mock_search, mock_get_api, metron_creds):
+    def test_search_returns_results(self, mock_get_api, metron_creds):
         from models.providers.metron_provider import MetronProvider
 
-        mock_get_api.return_value = MagicMock()
-        mock_search.return_value = {
+        mock_client = MagicMock()
+        mock_client.search_series_by_name.return_value = {
             "id": 100, "name": "Batman", "year_began": 2016,
             "publisher_name": "DC Comics", "issue_count": 50,
         }
+        mock_get_api.return_value = mock_client
 
         p = MetronProvider(credentials=metron_creds)
         results = p.search_series("Batman")
@@ -86,11 +86,13 @@ class TestMetronProviderSearchSeries:
         assert results[0].provider == ProviderType.METRON
 
     @patch("models.metron.get_api")
-    @patch("models.metron.search_series_by_name", return_value=None)
-    def test_search_no_results(self, mock_search, mock_get_api, metron_creds):
+    def test_search_no_results(self, mock_get_api, metron_creds):
         from models.providers.metron_provider import MetronProvider
 
-        mock_get_api.return_value = MagicMock()
+        mock_client = MagicMock()
+        mock_client.search_series_by_name.return_value = None
+        mock_get_api.return_value = mock_client
+
         p = MetronProvider(credentials=metron_creds)
         assert p.search_series("NonexistentSeries") == []
 
@@ -104,15 +106,15 @@ class TestMetronProviderSearchSeries:
 class TestMetronProviderGetSeries:
 
     @patch("models.metron.get_api")
-    @patch("models.metron.get_series_details")
-    def test_get_series_by_id(self, mock_details, mock_get_api, metron_creds):
+    def test_get_series_by_id(self, mock_get_api, metron_creds):
         from models.providers.metron_provider import MetronProvider
 
-        mock_get_api.return_value = MagicMock()
-        mock_details.return_value = {
+        mock_client = MagicMock()
+        mock_client.get_series_details.return_value = {
             "id": 100, "name": "Batman", "year_began": 2016,
             "publisher_name": "DC Comics", "desc": "The Dark Knight",
         }
+        mock_get_api.return_value = mock_client
 
         p = MetronProvider(credentials=metron_creds)
         result = p.get_series("100")
@@ -122,11 +124,13 @@ class TestMetronProviderGetSeries:
         assert result.description == "The Dark Knight"
 
     @patch("models.metron.get_api")
-    @patch("models.metron.get_series_details", return_value=None)
-    def test_get_series_not_found(self, mock_details, mock_get_api, metron_creds):
+    def test_get_series_not_found(self, mock_get_api, metron_creds):
         from models.providers.metron_provider import MetronProvider
 
-        mock_get_api.return_value = MagicMock()
+        mock_client = MagicMock()
+        mock_client.get_series_details.return_value = None
+        mock_get_api.return_value = mock_client
+
         p = MetronProvider(credentials=metron_creds)
         assert p.get_series("9999") is None
 
@@ -134,17 +138,17 @@ class TestMetronProviderGetSeries:
 class TestMetronProviderGetIssues:
 
     @patch("models.metron.get_api")
-    @patch("models.metron.get_all_issues_for_series")
-    def test_returns_issue_results(self, mock_issues, mock_get_api, metron_creds):
+    def test_returns_issue_results(self, mock_get_api, metron_creds):
         from models.providers.metron_provider import MetronProvider
 
-        mock_get_api.return_value = MagicMock()
-        mock_issues.return_value = [
+        mock_client = MagicMock()
+        mock_client.get_all_issues_for_series.return_value = [
             {"id": 1, "number": "1", "name": "First", "cover_date": "2020-01-01",
              "store_date": None, "image": None},
             {"id": 2, "number": "2", "name": "Second", "cover_date": "2020-02-01",
              "store_date": None, "image": None},
         ]
+        mock_get_api.return_value = mock_client
 
         p = MetronProvider(credentials=metron_creds)
         results = p.get_issues("100")
@@ -155,13 +159,13 @@ class TestMetronProviderGetIssues:
         assert results[1].issue_number == "2"
 
     @patch("models.metron.get_api")
-    @patch("models.metron.get_all_issues_for_series")
-    def test_handles_object_issues(self, mock_issues, mock_get_api, metron_creds):
+    def test_handles_object_issues(self, mock_get_api, metron_creds):
         from models.providers.metron_provider import MetronProvider
 
-        mock_get_api.return_value = MagicMock()
+        mock_client = MagicMock()
         mock_issue = make_mock_issue(id=10, number="5", name="Five")
-        mock_issues.return_value = [mock_issue]
+        mock_client.get_all_issues_for_series.return_value = [mock_issue]
+        mock_get_api.return_value = mock_client
 
         p = MetronProvider(credentials=metron_creds)
         results = p.get_issues("100")
@@ -170,11 +174,13 @@ class TestMetronProviderGetIssues:
         assert results[0].issue_number == "5"
 
     @patch("models.metron.get_api")
-    @patch("models.metron.get_all_issues_for_series", return_value=[])
-    def test_empty_series(self, mock_issues, mock_get_api, metron_creds):
+    def test_empty_series(self, mock_get_api, metron_creds):
         from models.providers.metron_provider import MetronProvider
 
-        mock_get_api.return_value = MagicMock()
+        mock_client = MagicMock()
+        mock_client.get_all_issues_for_series.return_value = []
+        mock_get_api.return_value = mock_client
+
         p = MetronProvider(credentials=metron_creds)
         assert p.get_issues("100") == []
 
@@ -185,9 +191,9 @@ class TestMetronProviderGetIssue:
     def test_get_single_issue(self, mock_get_api, metron_creds):
         from models.providers.metron_provider import MetronProvider
 
-        mock_api = MagicMock()
-        mock_api.issue.return_value = make_mock_issue(id=500, number="1")
-        mock_get_api.return_value = mock_api
+        mock_client = MagicMock()
+        mock_client.issue.return_value = make_mock_issue(id=500, number="1")
+        mock_get_api.return_value = mock_client
 
         p = MetronProvider(credentials=metron_creds)
         result = p.get_issue("500")
@@ -200,9 +206,9 @@ class TestMetronProviderGetIssue:
     def test_issue_not_found(self, mock_get_api, metron_creds):
         from models.providers.metron_provider import MetronProvider
 
-        mock_api = MagicMock()
-        mock_api.issue.return_value = None
-        mock_get_api.return_value = mock_api
+        mock_client = MagicMock()
+        mock_client.issue.return_value = None
+        mock_get_api.return_value = mock_client
 
         p = MetronProvider(credentials=metron_creds)
         assert p.get_issue("9999") is None
@@ -210,14 +216,14 @@ class TestMetronProviderGetIssue:
 
 class TestMetronProviderToComicinfo:
 
-    @patch("models.metron.get_api")
     @patch("models.metron.map_to_comicinfo")
-    def test_maps_to_comicinfo(self, mock_map, mock_get_api, metron_creds):
+    @patch("models.metron.get_api")
+    def test_maps_to_comicinfo(self, mock_get_api, mock_map, metron_creds):
         from models.providers.metron_provider import MetronProvider
 
-        mock_api = MagicMock()
-        mock_api.issue.return_value = make_mock_issue()
-        mock_get_api.return_value = mock_api
+        mock_client = MagicMock()
+        mock_client.issue.return_value = make_mock_issue()
+        mock_get_api.return_value = mock_client
         mock_map.return_value = {"Series": "Batman", "Number": "1", "Publisher": "DC Comics"}
 
         p = MetronProvider(credentials=metron_creds)
