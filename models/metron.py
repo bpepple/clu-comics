@@ -8,6 +8,7 @@ import time
 from datetime import datetime, timedelta
 from version import __version__
 
+from flask import current_app
 import requests.exceptions as requests_exceptions
 from mokkari.session import Session as MokkariSession
 from mokkari.exceptions import ApiError, RateLimitError
@@ -771,3 +772,10 @@ def get_api(username: str, password: str) -> Optional[MetronClient]:
     except Exception as e:
         app_logger.error(f"Failed to initialize Metron API: {e}")
         return None
+
+
+def get_api_from_app_config() -> Optional[MetronClient]:
+    """Initialize MetronClient using credentials from Flask app config."""
+    username = current_app.config.get("METRON_USERNAME", "").strip()
+    password = current_app.config.get("METRON_PASSWORD", "").strip()
+    return get_api(username, password)
